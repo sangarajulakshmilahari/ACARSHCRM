@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 // File: E:\Acarsh123\app\api\auth\login\route.ts
-=======
-// File: /home/ubuntu/Acarsh/Acarsh123/app/api/auth/login/route.ts
->>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b
 import * as entry from '../../../../../../app/api/auth/login/route.js'
 import type { NextRequest } from 'next/server.js'
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 // File: E:\Acarsh123\app\webpage\page.tsx
-=======
-// File: /home/ubuntu/Acarsh/Acarsh123/app/webpage/page.tsx
->>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b
 import * as entry from '../../../../app/webpage/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

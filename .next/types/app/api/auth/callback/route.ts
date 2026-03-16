@@ -1,15 +1,5 @@
-<<<<<<< HEAD
-<<<<<<<< HEAD:.next/types/app/api/auth/callback/route.ts
 // File: E:\Acarsh123\app\api\auth\callback\route.ts
 import * as entry from '../../../../../../app/api/auth/callback/route.js'
-========
-// File: /home/ubuntu/Acarsh/Acarsh123/app/api/employees/account/route.ts
-import * as entry from '../../../../../../app/api/employees/account/route.js'
->>>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b:.next/types/app/api/employees/account/route.ts
-=======
-// File: /home/ubuntu/Acarsh/Acarsh123/app/api/auth/callback/route.ts
-import * as entry from '../../../../../../app/api/auth/callback/route.js'
->>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b
 import type { NextRequest } from 'next/server.js'
 
 type TEntry = typeof import('../../../../../../app/api/auth/callback/route.js')

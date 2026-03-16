@@ -1,8 +1,5 @@
 import { keycloak } from "../../lib/keycloak";
-<<<<<<< HEAD
-import { getPool } from "@/config/db";
-=======
->>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b
+import { getPool } from "../../../../config/db";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -34,7 +31,6 @@ export async function GET(req: Request) {
     return new Response("Token exchange failed", { status: 401 });
   }
 
-<<<<<<< HEAD
   // Decode access token to extract username/email
   let usernameOrEmail: string | null = null;
   try {
@@ -90,7 +86,6 @@ export async function GET(req: Request) {
     console.error("DB verification error:", err);
     return new Response("Server error", { status: 500 });
   }
-=======
   //  Set token in HTTP-only cookie
   return new Response(null, {
     status: 302,
@@ -99,5 +94,4 @@ export async function GET(req: Request) {
       Location: "/webpage",
     },
   });
->>>>>>> 1356f272e316d4b9198119a5be47e097b59c843b
 }
