@@ -1,6 +1,8 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
   "/webpage/page": "app/webpage/page.js",
+  "/api/employees/leads/route": "app/api/employees/leads/route.js",
   "/api/dashboard/route": "app/api/dashboard/route.js",
-  "/api/ai/chat/route": "app/api/ai/chat/route.js"
+  "/api/employees/outreach-analytics/route": "app/api/employees/outreach-analytics/route.js",
+  "/api/masters/others/route": "app/api/masters/others/route.js",
+  "/api/employees/leads/[leadID]/route": "app/api/employees/leads/[leadID]/route.js"
 }

@@ -24,7 +24,7 @@ export type ToolResult = {
   [key: string]: any;
 };
 
-/**
+/** 
  * Execute a tool call from the LLM.
  */
 export async function executeTool(
@@ -54,7 +54,69 @@ export async function executeTool(
       case "get_dropdowns":
         return await getDropdowns(pool);
 
-      // ─── CONVERSION TOOLS (Phase 2) ───
+      // ═══════════════════════════════════════════════════
+// REPLACE the count_leads case in your executor.ts with this:
+// ═══════════════════════════════════════════════════
+
+      case "count_leads": {
+        // Base query using same table structure as searchLead
+        let query = `
+          SELECT 
+            COUNT(DISTINCT l.LeadId) as total,
+            SUM(CASE WHEN ls.StatusName = 'New' THEN 1 ELSE 0 END) as newCount,
+            SUM(CASE WHEN ls.StatusName = 'Contacted' THEN 1 ELSE 0 END) as contactedCount,
+            SUM(CASE WHEN ls.StatusName = 'Follow-Up' THEN 1 ELSE 0 END) as followUpCount,
+            SUM(CASE WHEN ls.StatusName = 'Qualified' THEN 1 ELSE 0 END) as qualifiedCount,
+            SUM(CASE WHEN ls.StatusName = 'Unqualified' THEN 1 ELSE 0 END) as unqualifiedCount,
+            SUM(CASE WHEN ls.StatusName = 'Lost' THEN 1 ELSE 0 END) as lostCount,
+            SUM(CASE WHEN ls.StatusName = 'Converted' THEN 1 ELSE 0 END) as convertedCount
+          FROM leads l
+          LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
+          LEFT JOIN Users u ON l.OwnerId = u.UserId
+          LEFT JOIN AccountTypes at ON l.AccountTypeId = at.AccountTypeId
+          WHERE 1=1
+        `;
+        const countParams: any[] = [];
+
+        if (params.ownerName) {
+          query += ` AND u.UserName LIKE ?`;
+          countParams.push(`%${params.ownerName}%`);
+        }
+        if (params.statusName) {
+          query += ` AND ls.StatusName = ?`;
+          countParams.push(params.statusName);
+        }
+        if (params.accountType) {
+          query += ` AND at.Name = ?`;
+          countParams.push(params.accountType);
+        }
+
+        const [countRows]: any = await pool.execute(query, countParams);
+        const cr = countRows[0];
+
+        let filterDesc = "all records";
+        if (params.ownerName) filterDesc = `records managed by ${params.ownerName}`;
+        if (params.statusName) filterDesc = `records with status "${params.statusName}"`;
+        if (params.accountType) filterDesc = `${params.accountType}s`;
+
+        return {
+          success: true,
+          message: `${filterDesc}: ${cr.total} total. Breakdown — ${cr.newCount} New, ${cr.contactedCount} Contacted, ${cr.followUpCount} Follow-Up, ${cr.qualifiedCount} Qualified, ${cr.unqualifiedCount} Unqualified, ${cr.lostCount} Lost, ${cr.convertedCount} Converted.`,
+          total: cr.total,
+          breakdown: {
+            new: cr.newCount,
+            contacted: cr.contactedCount,
+            followUp: cr.followUpCount,
+            qualified: cr.qualifiedCount,
+            unqualified: cr.unqualifiedCount,
+            lost: cr.lostCount,
+            converted: cr.convertedCount,
+          },
+          filter: filterDesc,
+        };
+      }
+
+      // ─── CONVERSION TOOLS  ───
       case "convert_lead":
         return await convertLead(pool, params.leadId, params.confirmed);
 

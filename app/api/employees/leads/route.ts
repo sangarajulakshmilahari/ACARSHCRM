@@ -1,22 +1,32 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "../../../../config/db";
+import { getAuthUser } from "../../lib/auth";
 
 
   //  GET — FETCH LEADS
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const pool = await getPool();
 
-    const [rows]: any = await pool.query(`
+    const isAdmin = authUser.roleId === 1;
+    const baseQuery = `
       SELECT
         l.LeadId,
         l.CompanyName,
         l.CompanyLocation,
         l.LeadSource,
         l.LeadDate,
+        l.CreatedOn,
         l.LeadNotes,
-        ls.StatusName,
+        COALESCE(las.StatusName, ls.StatusName) AS StatusName,
+        latestActivity.ActivityId AS LatestActivityId,
+        latestActivity.Notes AS LatestActivityNotes,
         lc.ContactName,
         lc.ContactTitle,
         lc.ContactEmail,
@@ -36,11 +46,36 @@ export async function GET() {
         ON l.OwnerId = u.UserId
       LEFT JOIN AccountTypes at
         ON l.AccountTypeId = at.AccountTypeId
+      LEFT JOIN (
+        SELECT LeadId, ActivityId, StatusId, Notes
+        FROM (
+          SELECT
+            la.LeadId,
+            la.ActivityId,
+            la.StatusId,
+            la.Notes,
+            ROW_NUMBER() OVER (
+              PARTITION BY la.LeadId
+              ORDER BY la.ActivityDate DESC, la.CreatedOn DESC, la.ActivityId DESC
+            ) AS rn
+          FROM LeadActivities la
+        ) rankedActivities
+        WHERE rn = 1
+      ) latestActivity
+        ON latestActivity.LeadId = l.LeadId
+      LEFT JOIN LeadStatuses las
+        ON latestActivity.StatusId = las.StatusId
       WHERE (at.Name IS NULL OR at.Name NOT IN ('Prospect','Account'))
-    `);
+      ${isAdmin ? "" : "AND l.OwnerId = ?"}
+    `;
 
+    const [rows]: any = await pool.query(
+      baseQuery,
+      isAdmin ? [] : [authUser.userId]
+    );
+ 
     const grouped: any = {};
-
+ 
     rows.forEach((row: any) => {
       if (!grouped[row.LeadId]) {
         grouped[row.LeadId] = {
@@ -49,13 +84,16 @@ export async function GET() {
           CompanyLocation: row.CompanyLocation,
           LeadSource: row.LeadSource,
           LeadDate: row.LeadDate,
+          CreatedOn: row.CreatedOn,
           LeadNotes: row.LeadNotes,
           StatusName: row.StatusName,
+          LatestActivityId: row.LatestActivityId,
+          LatestActivityNotes: row.LatestActivityNotes,
           OwnerName: row.OwnerName,
           Contacts: [],
         };
       }
-
+ 
       if (row.ContactName || row.ContactEmail || row.ContactPhone) {
         grouped[row.LeadId].Contacts.push({
           ContactName: row.ContactName,
@@ -66,7 +104,7 @@ export async function GET() {
         });
       }
     });
-
+ 
     return NextResponse.json(Object.values(grouped));
   } catch (err) {
     console.error("Error fetching leads:", err);
@@ -76,16 +114,16 @@ export async function GET() {
     );
   }
 }
-
-
+ 
+ 
   //  POST — CREATE LEAD
-
+ 
 export async function POST(req: Request) {
   let conn: any;
-
+ 
   try {
     const body = await req.json();
-
+ 
     const {
       CompanyName,
       CompanyLocation,
@@ -101,25 +139,25 @@ export async function POST(req: Request) {
       ContactRoleName,
       AddReminder,
     } = body;
-
+ 
     const pool = await getPool();
     conn = await pool.getConnection();
     await conn.beginTransaction();
-
+ 
     /* 1 Get StatusId */
     const [statusRows]: any = await conn.query(
       `SELECT StatusId FROM LeadStatuses WHERE StatusName = ?`,
       [StatusName]
     );
     const StatusId = statusRows[0]?.StatusId ?? 1;
-
+ 
     /* 2 Get OwnerId */
     const [ownerRows]: any = await conn.query(
       `SELECT UserId FROM Users WHERE UserName = ?`,
       [OwnerName]
     );
     const OwnerId = ownerRows[0]?.UserId ?? null;
-
+ 
     /* 3 Insert Lead */
     const [leadInsert]: any = await conn.query(
       `
@@ -137,9 +175,9 @@ export async function POST(req: Request) {
         OwnerId,
       ]
     );
-
+ 
     const LeadId = leadInsert.insertId;
-
+ 
     /* 4 Insert Contact (STRICT) */
     if (ContactName || ContactEmail || ContactPhone) {
       if (!ContactRoleName) {
@@ -149,12 +187,12 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-
+ 
       const [roleRows]: any = await conn.query(
         `SELECT RoleId FROM ContactRoles WHERE Role = ?`,
         [ContactRoleName]
       );
-
+ 
       if (!roleRows.length) {
         await conn.rollback();
         return NextResponse.json(
@@ -162,9 +200,9 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-
+ 
       const ContactRoleId = roleRows[0].RoleId;
-
+ 
       await conn.query(
         `
         INSERT INTO LeadContacts
@@ -181,7 +219,7 @@ export async function POST(req: Request) {
         ]
       );
     }
-
+ 
     /* 5 Optional Reminder */
     if (AddReminder) {
       await conn.query(
@@ -192,9 +230,9 @@ export async function POST(req: Request) {
         [LeadId]
       );
     }
-
+ 
     await conn.commit();
-
+ 
     return NextResponse.json(
       { message: "Lead created successfully", LeadId },
       { status: 200 }
@@ -210,37 +248,37 @@ export async function POST(req: Request) {
     if (conn) conn.release();
   }
 }
-
-
+ 
+ 
   //  DELETE — DELETE LEAD
-
+ 
 export async function DELETE(req: Request) {
   let conn: any;
-
+ 
   try {
     const { searchParams } = new URL(req.url);
     const leadId = Number(searchParams.get("leadId"));
-
+ 
     if (isNaN(leadId)) {
       return NextResponse.json(
         { error: "LeadId is required" },
         { status: 400 }
       );
     }
-
+ 
     const pool = await getPool();
     conn = await pool.getConnection();
     await conn.beginTransaction();
-
+ 
     // Delete child records first
     await conn.query(`DELETE FROM LeadContacts WHERE LeadId = ?`, [leadId]);
     await conn.query(`DELETE FROM LeadActivities WHERE LeadId = ?`, [leadId]);
     await conn.query(`DELETE FROM LeadReminders WHERE LeadId = ?`, [leadId]);
     await conn.query(`DELETE FROM Opportunities WHERE LeadId = ?`, [leadId]);
     await conn.query(`DELETE FROM Leads WHERE LeadId = ?`, [leadId]);
-
+ 
     await conn.commit();
-
+ 
     return NextResponse.json({ message: "Lead deleted successfully" });
   } catch (err) {
     if (conn) await conn.rollback();
@@ -253,3 +291,5 @@ export async function DELETE(req: Request) {
     if (conn) conn.release();
   }
 }
+ 
+ 

@@ -17,6 +17,20 @@ export async function GET() {
     `);
 
 
+    //  Lead Statuses
+
+    const [leadStatuses]: any = await pool.query(`
+      SELECT
+        StatusId,
+        StatusName,
+        StatusDesc,
+        SortOrder,
+        ColorCode
+      FROM LeadStatuses
+      ORDER BY SortOrder, StatusId
+    `);
+
+
     //  Companies
 
     const [companies]: any = await pool.query(`
@@ -80,6 +94,7 @@ export async function GET() {
 
     return NextResponse.json({
       opportunityStatuses,
+      leadStatuses,
       companies,
       leadSources,
       ownername,

@@ -4,6 +4,7 @@ import "./globals.css";
 import { Provider } from "react-redux";
 import { store } from "../store/store";
 import Script from "next/script";
+import GlobalAlertProvider from "./components/GlobalAlertProvider";
 
 export default function RootLayout({
   children,
@@ -22,7 +23,9 @@ export default function RootLayout({
       </head>
 
       <body>
-        <Provider store={store}>{children}</Provider>
+        <Provider store={store}>
+          <GlobalAlertProvider>{children}</GlobalAlertProvider>
+        </Provider>
       </body>
       
     </html>

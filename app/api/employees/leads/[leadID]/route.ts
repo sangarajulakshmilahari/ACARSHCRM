@@ -51,9 +51,14 @@ WHERE l.LeadId = ?
       const [contacts]: any = await conn.query(
         `
         SELECT
+          lc.LeadContactID,
           lc.ContactName,
           lc.ContactTitle,
           lc.ContactEmail,
+          lc.LinkedInProfile,
+          lc.LinkedInRequestSent,
+          lc.LinkedInRequestAccepted,
+          lc.EmailSent,
           cr.Role AS ContactRoleName
         FROM LeadContacts lc
         LEFT JOIN ContactRoles cr ON lc.ContactRoleId = cr.RoleId
@@ -63,21 +68,24 @@ WHERE l.LeadId = ?
       );
 
       /* 3. Activities */
-      const [activities]: any = await conn.query(
+       const [activities]: any = await conn.query(
         `
         SELECT
           la.ActivityId,
           DATE_FORMAT(la.ActivityDate, '%Y-%m-%d') AS ActivityDate,
           la.ActivityType AS Mode,
           la.Notes,
-          ls.StatusName AS Status
+          ls.StatusName AS Status,
+          lc.ContactName
         FROM LeadActivities la
         LEFT JOIN LeadStatuses ls ON la.StatusId = ls.StatusId
+        LEFT JOIN LeadContacts lc ON la.ContactId = lc.LeadContactID
         WHERE la.LeadId = ?
         ORDER BY la.ActivityDate DESC
         `,
         [leadId]
       );
+
 
       /* 4. Reminders */
       const [reminders]: any = await conn.query(
@@ -261,8 +269,9 @@ export async function PUT(
         await conn.query(
           `
           INSERT INTO LeadContacts
-          (LeadId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactRoleId)
-          VALUES (?, ?, ?, ?, ?, ?)
+          (LeadId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactRoleId,
+           LinkedInProfile, LinkedInRequestSent, LinkedInRequestAccepted, EmailSent)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             leadId,
@@ -271,6 +280,10 @@ export async function PUT(
             c.ContactTitle || null,
             c.ContactPhone || null,
             roleId,
+            c.LinkedInProfile || null,
+            c.LinkedInRequestSent ? 1 : 0,
+            c.LinkedInRequestAccepted ? 1 : 0,
+            c.EmailSent ? 1 : 0,
           ]
         );
       }

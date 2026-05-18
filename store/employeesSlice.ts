@@ -6,6 +6,10 @@ export interface LeadContact {
   ContactEmail: string | null;
   ContactPhone: string | null;
   ContactRoleName: string | null;
+  LinkedInProfile: string | null;
+  LinkedInRequestSent: boolean;
+  LinkedInRequestAccepted: boolean;
+  EmailSent: boolean;
 }
 
 export interface EmployeeLead {

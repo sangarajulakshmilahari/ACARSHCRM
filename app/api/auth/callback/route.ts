@@ -1,5 +1,4 @@
 import { keycloak } from "../../lib/keycloak";
-import { getPool } from "../../../../config/db";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -31,61 +30,6 @@ export async function GET(req: Request) {
     return new Response("Token exchange failed", { status: 401 });
   }
 
-  // Decode access token to extract username/email
-  let usernameOrEmail: string | null = null;
-  try {
-    const parts = (tokenData.access_token || "").split(".");
-    if (parts.length >= 2) {
-      const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
-      usernameOrEmail = payload.preferred_username || payload.email || null;
-    }
-  } catch (err) {
-    console.error("Failed to decode token payload", err);
-  }
-
-  if (!usernameOrEmail) {
-    return new Response("Unable to determine user from token", { status: 401 });
-  }
-
-  // Verify the user exists in local DB (Users table)
-  try {
-    const pool = await getPool();
-    const conn = await pool.getConnection();
-    try {
-      const [rows]: any = await conn.query(
-        `SELECT UserId, UserName, Email, IsActive FROM Users WHERE UserName = ? OR Email = ? LIMIT 1`,
-        [usernameOrEmail, usernameOrEmail]
-      );
-
-      if (!rows || !rows.length) {
-        // User exists in Keycloak but not in local DB -> deny
-        return new Response("Unauthorized", { status: 403 });
-      }
-
-      const user = rows[0];
-      if (user.IsActive === 0) {
-        return new Response("User is inactive", { status: 403 });
-      }
-
-      // Set token cookie and optional user info cookie
-      const cookieOptions = [`access_token=${tokenData.access_token}; HttpOnly; Path=/; SameSite=Lax`];
-      // Add a non-HttpOnly cookie with username for client UI if desired
-      cookieOptions.push(`user=${encodeURIComponent(user.UserName)}; Path=/; SameSite=Lax`);
-
-      return new Response(null, {
-        status: 302,
-        headers: {
-          "Set-Cookie": cookieOptions.join("; "),
-          Location: "/webpage",
-        },
-      });
-    } finally {
-      conn.release();
-    }
-  } catch (err) {
-    console.error("DB verification error:", err);
-    return new Response("Server error", { status: 500 });
-  }
   //  Set token in HTTP-only cookie
   return new Response(null, {
     status: 302,

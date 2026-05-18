@@ -9,6 +9,10 @@ type Contact = {
   ContactTitle?: string;
   ContactRoleName?: string;
   ContactPhone?: string;
+  LinkedInProfile?: string;
+  LinkedInRequestSent?: boolean;
+  LinkedInRequestAccepted?: boolean;
+  EmailSent?: boolean;
 };
 
 type Lead = {
@@ -26,6 +30,7 @@ type Lead = {
   Opportunities?: any[];
   ExpansionAreas?: string;
   Tags?: string;
+   IndustryFocus?: string;
 };
 
 export type EditLeadProps = {
@@ -48,6 +53,7 @@ export default function EditLeadClient({
   const [loading, setLoading] = useState<boolean>(!!effectiveLeadId);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [leadStatuses, setLeadStatuses] = useState<any[]>([]);
 
   // initial empty state (will be populated by fetch if leadId exists)
   const emptyLead: Lead = {
@@ -56,7 +62,7 @@ export default function EditLeadClient({
     LeadSource: "",
     LeadDate: "",
     OwnerName: "",
-    StatusName: "New",
+    StatusName: "",
     Contacts: [
       {
         ContactName: "",
@@ -73,6 +79,27 @@ export default function EditLeadClient({
 
   const [lead, setLead] = useState<Lead>(emptyLead);
   const [originalLead, setOriginalLead] = useState<Lead | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/masters/others")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.leadStatuses)) return;
+
+        setLeadStatuses(data.leadStatuses);
+        setLead((prev) => ({
+          ...prev,
+          StatusName: prev.StatusName || data.leadStatuses[0]?.StatusName || "",
+        }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Fetch lead details when effectiveLeadId changes
   useEffect(() => {
@@ -144,10 +171,11 @@ export default function EditLeadClient({
       LeadId: data?.LeadId ?? data?.leadId ?? null,
       CompanyName: data?.CompanyName ?? data?.Company ?? "",
       CompanyLocation: data?.CompanyLocation ?? data?.Location ?? "",
+      IndustryFocus: data?.IndustryFocus ?? "",
       LeadSource: data?.LeadSource ?? data?.Source ?? "",
       LeadDate: data?.LeadDate ?? data?.Date ?? "",
       OwnerName: data?.OwnerName ?? data?.Owner ?? "",
-      StatusName: data?.StatusName ?? data?.Status ?? "New",
+      StatusName: data?.StatusName ?? data?.Status ?? "",
       Contacts: Array.isArray(data?.Contacts)
         ? data.Contacts
         : data?.contacts ?? [],
@@ -263,10 +291,10 @@ export default function EditLeadClient({
   const cardStyle: React.CSSProperties = {
     background: "#fff",
     padding: 22,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
-    border: "1px solid #e3e6e8",
-    boxShadow: "0 0 0 1px rgba(0,0,0,0.01)",
+    border: "1px solid #e7edf6",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
   };
 
   const labelStyle: React.CSSProperties = {
@@ -281,12 +309,13 @@ export default function EditLeadClient({
     gap: 20,
     marginBottom: 14,
     alignItems: "flex-start",
+    flexWrap: "wrap",
   };
   const inputCommon: React.CSSProperties = {
     width: "100%",
     padding: "12px 14px",
-    borderRadius: 6,
-    border: "1px solid #d9d9d9",
+    borderRadius: 8,
+    border: "1px solid #d8e1ef",
     boxSizing: "border-box",
     fontSize: 14,
     background: "#fff",
@@ -298,7 +327,7 @@ export default function EditLeadClient({
 
   // ----------- render form populated from `lead` -----------
   return (
-    <div style={{ padding: 35, maxWidth: 1100, margin: "auto" }}>
+    <div style={{ padding: 28, maxWidth: 1100, margin: "auto" }}>
       <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -308,17 +337,18 @@ export default function EditLeadClient({
        <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>
         Edit Lead - {lead.CompanyName}
        </h2>
-       <button
+        <button
         onClick={onBack}
         style={{
           background: "#f56c00",
           color: "white",
-          padding: "8px 16px",
-          borderRadius: 6,
+          padding: "9px 16px",
+          borderRadius: 8,
           border: "none",
           cursor: "pointer",
           fontSize: 14,
-          fontWeight: 500,
+          fontWeight: 600,
+          boxShadow: "0 6px 14px rgba(245, 108, 0, 0.25)",
         }}
       >
         ← Back
@@ -362,6 +392,16 @@ export default function EditLeadClient({
           </div>
         </div>
 
+        <div style={{ flex: 1 }}>
+  <label style={labelStyle}>Industry Focus</label>
+  <input
+    style={inputCommon}
+    value={lead.IndustryFocus ?? ""}
+    onChange={(e) => updateField("IndustryFocus", e.target.value)}
+    placeholder="e.g., Healthcare, Fintech"
+  />
+</div>
+
         <div style={rowStyle}>
           <div style={{ flex: 1 }}>
             <label style={labelStyle}>Lead Source</label>
@@ -401,17 +441,19 @@ export default function EditLeadClient({
             <label style={labelStyle}>Status</label>
             <select
               style={selectCommon}
-              value={lead.StatusName ?? "New"}
+              value={lead.StatusName ?? ""}
               onChange={(e) => updateField("StatusName", e.target.value)}
             >
-              <option>New</option>
-              <option>Contacted</option>
-              <option>Follow-up</option>
-              <option>Qualified</option>
-              <option>Unqualified</option>
-              <option>Proposal Sent</option>
-              <option>Lost</option>
-              <option>Converted</option>
+              <option value="">Select status</option>
+              {leadStatuses.map((status) => (
+                <option
+                  key={status.StatusId}
+                  value={status.StatusName}
+                  title={status.StatusDesc}
+                >
+                  {status.StatusName}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -437,11 +479,12 @@ export default function EditLeadClient({
               key={i}
               style={{
                 background: "#ffffff",
-                border: "1px solid #edeff1",
-                borderRadius: 6,
+                border: "1px solid #e7edf6",
+                borderRadius: 10,
                 padding: 16,
                 marginBottom: 16,
                 position: "relative",
+                boxShadow: "0 6px 14px rgba(15, 23, 42, 0.04)",
               }}
             >
               {(lead.Contacts || []).length > 0 && (
@@ -528,7 +571,46 @@ export default function EditLeadClient({
                 </div>
               </div>
 
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 12 }}>
+                <label style={{ ...labelStyle, fontWeight: 600 }}>LinkedIn URL</label>
+                <input
+                  style={inputCommon}
+                  value={c?.LinkedInProfile ?? ""}
+                  onChange={(e) =>
+                    updateContact(i, "LinkedInProfile", e.target.value)
+                  }
+                  placeholder="https://linkedin.com/in/..."
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!c?.LinkedInRequestSent}
+                    onChange={(e) => updateContact(i, "LinkedInRequestSent", e.target.checked)}
+                  />
+                  <span>LinkedIn Request Sent</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!c?.LinkedInRequestAccepted}
+                    onChange={(e) => updateContact(i, "LinkedInRequestAccepted", e.target.checked)}
+                  />
+                  <span>LinkedIn Request Accepted</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!c?.EmailSent}
+                    onChange={(e) => updateContact(i, "EmailSent", e.target.checked)}
+                  />
+                  <span>Email Sent</span>
+                </label>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
                 <label style={{ ...labelStyle, fontWeight: 600 }}>Role</label>
                 <select
                   style={{ ...selectCommon, padding: "12px 14px" }}
@@ -551,12 +633,13 @@ export default function EditLeadClient({
               onClick={addContact}
               style={{
                 padding: "8px 12px",
-                background: "#007bff",
+                background: "#2563eb",
                 border: "none",
                 color: "#fff",
-                borderRadius: 6,
+                borderRadius: 8,
                 cursor: "pointer",
                 fontWeight: 600,
+                boxShadow: "0 6px 14px rgba(37, 99, 235, 0.24)",
               }}
             >
               + Add Another Contact
@@ -568,10 +651,11 @@ export default function EditLeadClient({
       {/* Additional Information */}
       <section
         style={{
-          borderRadius: 8,
+          borderRadius: 10,
           marginBottom: 20,
-          border: "1px solid #e9ecef",
+          border: "1px solid #e7edf6",
           overflow: "hidden",
+          boxShadow: "0 8px 18px rgba(15, 23, 42, 0.05)",
         }}
       >
         <div
@@ -647,10 +731,10 @@ export default function EditLeadClient({
           onClick={() => (onBack ? onBack() : router.back())}
           style={{
             padding: "10px 18px",
-            borderRadius: 6,
+            borderRadius: 8,
             border: "none",
-            background: "#9aa0a6",
-            color: "#fff",
+            background: "#e2e8f0",
+            color: "#334155",
             fontWeight: 600,
             cursor: "pointer",
             minWidth: 98,
@@ -666,14 +750,14 @@ export default function EditLeadClient({
             padding: "10px 18px",
             borderRadius: 8,
             border: "none",
-            background: "#0346c4",
+            background: "#2459d3",
             color: "#fff",
             fontWeight: 700,
             cursor: isDirty && !saving ? "pointer" : "not-allowed",
             display: "inline-flex",
             alignItems: "center",
             gap: 8,
-            boxShadow: "0 2px 8px rgba(3,70,196,0.18)",
+            boxShadow: "0 8px 18px rgba(36, 89, 211, 0.24)",
             minWidth: 140,
             opacity: isDirty && !saving ? 1 : 0.5,
           }}

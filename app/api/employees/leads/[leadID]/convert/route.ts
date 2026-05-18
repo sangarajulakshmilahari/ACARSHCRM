@@ -7,6 +7,16 @@ export async function POST(
 ) {
   const leadId = Number(params.leadID);
 
+  let requestedTarget: string | undefined;
+  try {
+    const body = await req.json();
+    if (body && typeof body.target === "string") {
+      requestedTarget = body.target.trim();
+    }
+  } catch {
+    requestedTarget = undefined;
+  }
+
   if (isNaN(leadId)) {
     return NextResponse.json(
       { error: "Invalid LeadId" },
@@ -46,7 +56,27 @@ export async function POST(
       Account: "MasterAccount",
     };
 
-    const targetType = NEXT_STAGE[currentType];
+    const allowedTargetsByCurrentType: Record<string, string[]> = {
+      Lead: ["Prospect", "Account"],
+      Prospect: ["Lead", "Account"],
+      Account: ["MasterAccount"],
+    };
+
+    const targetType = requestedTarget || NEXT_STAGE[currentType];
+
+    if (
+      requestedTarget &&
+      (!allowedTargetsByCurrentType[currentType] ||
+        !allowedTargetsByCurrentType[currentType].includes(requestedTarget))
+    ) {
+      await conn.rollback();
+      return NextResponse.json(
+        {
+          error: `Invalid target conversion from ${currentType} to ${requestedTarget}`,
+        },
+        { status: 400 }
+      );
+    }
 
     if (!targetType) {
       await conn.rollback();

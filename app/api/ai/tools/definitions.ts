@@ -168,7 +168,30 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  // ═══════════════════════════════════════════════════
+// ADD THIS to your definitions.ts TOOL_DEFINITIONS array
+// (paste it right before the closing bracket "]")
+// ═══════════════════════════════════════════════════
+
+  {
+    type: "function" as const,
+    function: {
+      name: "count_leads",
+      description: "Get total count of leads, optionally filtered by owner, status, or type. Use for 'how many leads', 'total leads', 'leads by X'.",
+      parameters: {
+        type: "object",
+        properties: {
+          ownerName: { type: "string", description: "Filter by owner name" },
+          statusName: { type: "string", description: "Filter by status: New, Contacted, Follow-Up, Qualified, Unqualified, Lost, Converted" },
+          accountType: { type: "string", description: "Filter by type: Lead, Prospect, Account" },
+        },
+        required: [],
+      },
+    },
+  },
 ];
+
+
 
 // Phase 1: core lead tools
 export const PHASE1_TOOLS = TOOL_DEFINITIONS.filter((t) =>

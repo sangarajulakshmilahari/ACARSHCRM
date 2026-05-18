@@ -1,13 +1,22 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import {
+  convertLeadDirectToAccountWithExistingFlow,
+  convertLeadWithExistingFlow,
+} from "../convert-actions";
 
 type Contact = {
+  LeadContactID?: number;
   ContactName?: string;
   ContactEmail?: string;
   ContactTitle?: string;
   ContactRoleName?: string;
+  LinkedInProfile?: string;
+  LinkedInRequestSent?: number | boolean;
+  LinkedInRequestAccepted?: number | boolean;
+  EmailSent?: number | boolean;
 };
 type Activity = {
   ActivityId: number;
@@ -15,6 +24,7 @@ type Activity = {
   Mode: string;
   Notes?: string;
   Status?: string;
+  ContactName?: string;
 };
 
 type Reminder = {
@@ -103,7 +113,7 @@ type OppContact = {
   LinkedInProfileUrl?: string;
 };
 
-export default function LeadDetailsPage({
+export default function LeadDetailsClient({
   leadId,
   onBack,
   onEdit,
@@ -118,10 +128,18 @@ export default function LeadDetailsPage({
   const [error, setError] = useState<string | null>(null);
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [showAddReminder, setShowAddReminder] = useState(false);
+  const [showConvertMenu, setShowConvertMenu] = useState(false);
   const [showAddOpportunity, setShowAddOpportunity] = useState(false);
   const [otherTechnologyMap, setOtherTechnologyMap] = useState<
     Record<number, string>
   >({});
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [contactSearch, setContactSearch] = useState("");
+  const [selectedContactIdx, setSelectedContactIdx] = useState<number | null>(null);
+
+
+
 
   const [opportunityView, setOpportunityView] = useState<
     "OPPORTUNITY" | "CONTACT"
@@ -172,6 +190,7 @@ export default function LeadDetailsPage({
 
   const [oppContactForm, setOppContactForm] = useState(EMPTY_OPP_CONTACT_FORM);
   const [opportunityStatuses, setOpportunityStatuses] = useState<any[]>([]);
+  const [leadStatuses, setLeadStatuses] = useState<any[]>([]);
   const [engagementModels, setEngagementModels] = useState<any[]>([]);
   const [Services, setServices] = useState<any[]>([]);
 
@@ -181,6 +200,9 @@ export default function LeadDetailsPage({
       .then((data) => {
         if (Array.isArray(data?.opportunityStatuses)) {
           setOpportunityStatuses(data.opportunityStatuses);
+        }
+        if (Array.isArray(data?.leadStatuses)) {
+          setLeadStatuses(data.leadStatuses);
         }
 
         // ✅ FIXED
@@ -212,6 +234,10 @@ export default function LeadDetailsPage({
     Notes: "",
     Status: "",
   });
+  const selectedActivityContact =
+    selectedContactIdx !== null
+      ? (lead?.Contacts ?? [])[selectedContactIdx] ?? null
+      : null;
 
   const [reminderForm, setReminderForm] = useState({
     ReminderDate: "",
@@ -336,6 +362,7 @@ export default function LeadDetailsPage({
           Notes: activityForm.Notes,
           Status: activityForm.Status,
           ActivityDate: new Date().toISOString(),
+          ContactId: selectedActivityContact?.LeadContactID ?? null,
         }),
       });
 
@@ -756,14 +783,6 @@ export default function LeadDetailsPage({
       : null);
 
   // NEW: helpers to pick label / back text
-  const getConvertLabel = () => {
-    if (finalOrigin === "leads") return "Convert to Prospect";
-    if (finalOrigin === "Prospect") return "Convert to Account";
-    if (finalOrigin === "Account") return "Convert to Master Account";
-
-    return "Already a Master Account";
-  };
-
   const getBackLabel = () => {
     if (origin === "leads") return "← Back to Leads";
     if (origin === "Prospect") return "← Back to Prospects";
@@ -801,44 +820,21 @@ export default function LeadDetailsPage({
     }
   };
 
-  // convert button handler
-
   const handleConvert = async () => {
-    if (!lead?.LeadId) {
-      alert("ID not found");
-      return;
-    }
+    await convertLeadWithExistingFlow({
+      leadId: lead?.LeadId,
+      origin: finalOrigin === "Prospect" || finalOrigin === "Account"
+        ? finalOrigin
+        : "leads",
+      router,
+    });
+  };
 
-    try {
-      const res = await fetch(`/api/employees/leads/${lead.LeadId}/convert`, {
-        method: "POST",
-      });
-
-      if (!res.ok) {
-        let errorMessage = "Conversion failed";
-
-        try {
-          const err = await res.json();
-          errorMessage = err.error || errorMessage;
-        } catch { }
-
-        throw new Error(errorMessage);
-      }
-
-      // SHOW SUCCESS POPUP
-      if (finalOrigin === "leads") {
-        alert("Converted successfully to Prospect");
-        router.push("/webpage?tab=prospect");
-      } else if (finalOrigin === "Prospect") {
-        alert("Converted successfully to Account");
-        router.push("/webpage?tab=account");
-      } else if (finalOrigin === "Account") {
-        alert("Converted successfully to Master Account");
-        router.push("/webpage?tab=masteraccount");
-      }
-    } catch (err: any) {
-      alert(err.message || "Failed to convert");
-    }
+  const handleConvertToAccount = async () => {
+    await convertLeadDirectToAccountWithExistingFlow({
+      leadId: lead?.LeadId,
+      router,
+    });
   };
 
   useEffect(() => {
@@ -949,11 +945,14 @@ export default function LeadDetailsPage({
       </div>
     );
   }
-
+  const isLead = lead?.AccountTypeId === 10;
+  const isProspect = lead?.AccountTypeId === 20;
+  const isAccount = lead?.AccountTypeId === 30;
   // STYLES
 
+
   const container: React.CSSProperties = {
-    padding: 15,
+    padding: 18,
     maxWidth: 1100,
     margin: "0 auto",
     fontFamily:
@@ -964,12 +963,12 @@ export default function LeadDetailsPage({
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 14,
   };
 
   const topActions: React.CSSProperties = {
     display: "flex",
-    gap: 8,
+    gap: 10,
     alignItems: "center",
   };
 
@@ -978,22 +977,26 @@ export default function LeadDetailsPage({
     borderRadius: 6,
     border: "none",
     background: "#3a77e3",
+    color: "#ffffff",
     cursor: "pointer",
+    fontWeight: 600,
+    boxShadow: "0 4px 10px rgba(58, 119, 227, 0.25)",
   };
 
   const primaryBtn: React.CSSProperties = {
-    padding: "8px 14px",
-    borderRadius: 6,
+    padding: "9px 14px",
+    borderRadius: 8,
     border: "none",
     background: "#3a77e3",
     color: "#fff",
     cursor: "pointer",
     fontWeight: 600,
+    boxShadow: "0 8px 18px rgba(58, 119, 227, 0.22)",
   };
 
   const secondaryBtn: React.CSSProperties = {
     padding: "8px 12px",
-    borderRadius: 6,
+    borderRadius: 8,
     border: "1px solid #3a77e3",
     background: "#fff",
     color: "#3a77e3",
@@ -1010,46 +1013,100 @@ export default function LeadDetailsPage({
 
   const cardStyle: React.CSSProperties = {
     background: "#fff",
-    borderRadius: 8,
-    padding: 18,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+    borderRadius: 12,
+    padding: 20,
+    boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
     flex: 1,
-    border: "1px solid #e6e6e6",
+    border: "1px solid #e6edf7",
   };
 
   const rightCardStyle: React.CSSProperties = {
     ...cardStyle,
-    maxWidth: 380,
+    maxWidth: 520,
   };
   const contactCardStyle: React.CSSProperties = {
     background: "#fff",
-    borderRadius: 8,
-    padding: "12px 14px",
+    borderRadius: 10,
+    padding: "16px 18px",
     border: "1px solid #eef1f4",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+    boxShadow: "0 6px 14px rgba(15, 23, 42, 0.05)",
     marginBottom: 12,
-    display: "flex",
-    gap: 12,
-    alignItems: "flex-start",
     borderLeft: "4px solid #1e90ff",
   };
 
   const contactAccentStyle: React.CSSProperties = {
-    paddingLeft: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minWidth: 0,
+    paddingLeft: 6,
   };
 
   const contactRowLabel: React.CSSProperties = {
     fontWeight: 700,
-    minWidth: 60,
+    width: 74,
+    flexShrink: 0,
     fontSize: 13,
     color: "#111",
+  };
+
+  const contactRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+    minWidth: 0,
+  };
+
+  const contactValueStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 1.35,
+    color: "#111827",
+    overflowWrap: "anywhere",
+  };
+
+  const contactLinkStyle: React.CSSProperties = {
+    color: "#2563eb",
+    textDecoration: "none",
+    overflowWrap: "anywhere",
+  };
+
+  const contactFooterStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+    paddingTop: 8,
+    marginTop: 2,
+    borderTop: "1px solid #eef2f7",
+  };
+
+  const contactOutreachStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    flexWrap: "wrap",
+  };
+
+  const contactCheckboxStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "#4b5563",
+    cursor: "pointer",
+    userSelect: "none",
+    whiteSpace: "nowrap",
   };
 
   const sectionTitle: React.CSSProperties = {
     fontSize: 16,
     fontWeight: 700,
     marginBottom: 10,
-    color: "#333",
+    color: "#1e293b",
   };
 
   const label: React.CSSProperties = {
@@ -1096,9 +1153,9 @@ export default function LeadDetailsPage({
 
   const tableWrap: React.CSSProperties = {
     background: "#fff",
-    borderRadius: 6,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-    border: "1px solid #e6e6e6",
+    borderRadius: 10,
+    boxShadow: "0 8px 18px rgba(15, 23, 42, 0.05)",
+    border: "1px solid #e6edf7",
     marginBottom: 16,
     overflow: "hidden",
   };
@@ -1106,9 +1163,9 @@ export default function LeadDetailsPage({
   const addBtn = {
     backgroundColor: "#3a77e3",
     color: "white",
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1237,20 +1294,94 @@ export default function LeadDetailsPage({
         </div>
 
         <div style={topActions}>
-          <button
-            onClick={handleConvert}
-            style={secondaryBtn}
-            disabled={finalOrigin === "MasterAccount"}
-          >
-            {finalOrigin === "MasterAccount"
-              ? "Already a Master Account"
-              : getConvertLabel()}
-          </button>
+          {/* LEAD (AccountTypeId = 10) */}
+          {false && isLead && (
+            <div
+              ref={dropdownRef}
+              style={{ position: "relative", display: "inline-block" }}
+            >
+
+              <button
+                style={secondaryBtn}
+                onClick={() => setShowConvertMenu((prev) => !prev)}
+              >
+                Convert ▾
+              </button>
+
+              {showConvertMenu && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "110%",
+                    right: 0,
+                    background: "#fff",
+                    border: "1px solid #ddd",
+                    borderRadius: "6px",
+                    boxShadow: "0 4px 10px rgba(0, 0, 0, 0.08)",
+                    padding: "6px",
+                    minWidth: "180px",
+                    zIndex: 100,
+                  }}
+                >
+                  <button
+                    onClick={handleConvert}
+                    onMouseEnter={() => setHoveredItem("prospect")}
+                    onMouseLeave={() => setHoveredItem(null)}
+                    style={{
+                      ...dropdownItem,
+                      backgroundColor: hoveredItem === "prospect" ? "#f1f5f9" : "#fff",
+                      color: hoveredItem === "prospect" ? "#2563eb" : "#333",
+                      cursor: "pointer",
+                      transform: hoveredItem === "prospect" ? "scale(1.03)" : "scale(1)",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    Convert to Prospect
+                  </button>
+
+                  <button
+                    onClick={handleConvertToAccount}
+                    onMouseEnter={() => setHoveredItem("account")}
+                    onMouseLeave={() => setHoveredItem(null)}
+                    style={{
+                      ...dropdownItem,
+                      backgroundColor: hoveredItem === "account" ? "#f1f5f9" : "#fff",
+                      color: hoveredItem === "account" ? "#2563eb" : "#333",
+                      cursor: "pointer",
+                      transform: hoveredItem === "account" ? "scale(1.03)" : "scale(1)",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    Convert to Account
+                  </button>
+
+
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* PROSPECT (AccountTypeId = 20) */}
+          {false && isProspect && (
+            <button onClick={handleConvert} style={secondaryBtn}>
+              Convert to Account
+            </button>
+          )}
+
+          {/* ACCOUNT (AccountTypeId = 30) */}
+          {false && isAccount && (
+            <button onClick={handleConvert} style={secondaryBtn}>
+              Convert to Master Account
+            </button>
+          )}
 
           <button onClick={handleEdit} style={primaryBtn}>
             Edit
           </button>
         </div>
+
+
       </div>
 
       <div style={rowStyle}>
@@ -1315,49 +1446,236 @@ export default function LeadDetailsPage({
               ...sectionTitle,
               borderBottom: "1px solid #e6e6e6",
               paddingBottom: 8,
+              marginBottom: 10,
             }}
           >
             Contacts
           </div>
 
-          {(lead.Contacts || []).map((c, idx) => (
-            <div key={idx} style={contactCardStyle}>
-              <div style={contactAccentStyle}>
-                <div style={{ display: "flex", marginBottom: 8 }}>
-                  <div style={contactRowLabel}>Name:</div>
-                  <div style={{ fontSize: 13 }}>{c.ContactName || "—"}</div>
-                </div>
+          {/* Search box */}
+          <input
+            type="text"
+            placeholder="Search contacts..."
+            value={contactSearch}
+            onChange={(e) => {
+              setContactSearch(e.target.value);
+              setSelectedContactIdx(null);
+            }}
+            style={{
+              width: "100%",
+              padding: "7px 10px",
+              marginBottom: 10,
+              border: "1px solid #d0d7e2",
+              borderRadius: 6,
+              fontSize: 13,
+              outline: "none",
+              boxSizing: "border-box",
+              background: "#f8fafd",
+            }}
+          />
 
-                {c.ContactTitle && (
-                  <div style={{ display: "flex", marginBottom: 6 }}>
-                    <div style={contactRowLabel}>Title:</div>
-                    <div style={{ fontSize: 13 }}>{c.ContactTitle}</div>
-                  </div>
-                )}
+          {/* Scrollable contact list – max 2 cards visible */}
+          <div
+            style={{
+              maxHeight: 310,
+              overflowY: "auto",
+              paddingRight: 4,
+            }}
+          >
+            {(lead.Contacts || [])
+              .map((c, originalIndex) => ({ c, originalIndex }))
+              .filter(({ c }) =>
+                (c.ContactName || "")
+                  .toLowerCase()
+                  .includes(contactSearch.toLowerCase())
+              )
+              .map(({ c, originalIndex }) => {
+                const isSelected = selectedContactIdx === originalIndex;
+                return (
+                  <div
+                    key={c.LeadContactID ?? originalIndex}
+                    onClick={() =>
+                      setSelectedContactIdx(isSelected ? null : originalIndex)
+                    }
+                    style={{
+                      ...contactCardStyle,
+                      cursor: "pointer",
+                      borderLeft: isSelected
+                        ? "4px solid #1e90ff"
+                        : "4px solid #cbd8ea",
+                      background: isSelected ? "#eef5ff" : "#fff",
+                      boxShadow: isSelected
+                        ? "0 0 0 2px #1e90ff44"
+                        : "0 1px 3px rgba(0,0,0,0.06)",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <div style={contactAccentStyle}>
+                      <div style={contactRowStyle}>
+                        <div style={contactRowLabel}>Name:</div>
+                        <div style={contactValueStyle}>
+                          {c.ContactName || "—"}
+                        </div>
+                      </div>
 
-                {c.ContactRoleName && (
-                  <div style={{ display: "flex", marginBottom: 6 }}>
-                    <div style={contactRowLabel}>Role:</div>
-                    <div style={{ fontSize: 13 }}>{c.ContactRoleName}</div>
-                  </div>
-                )}
+                      {c.ContactTitle && (
+                        <div style={contactRowStyle}>
+                          <div style={contactRowLabel}>Title:</div>
+                          <div style={contactValueStyle}>{c.ContactTitle}</div>
+                        </div>
+                      )}
 
-                {c.ContactEmail && (
-                  <div style={{ display: "flex" }}>
-                    <div style={contactRowLabel}>Email:</div>
-                    <div style={{ fontSize: 13, color: "#3a77e3" }}>
-                      <a
-                        href={`mailto:${c.ContactEmail}`}
-                        style={{ color: "inherit", textDecoration: "none" }}
-                      >
-                        {c.ContactEmail}
-                      </a>
+                      {c.ContactRoleName && (
+                        <div style={contactRowStyle}>
+                          <div style={contactRowLabel}>Role:</div>
+                          <div style={contactValueStyle}>
+                            {c.ContactRoleName}
+                          </div>
+                        </div>
+                      )}
+
+                      {c.ContactEmail && (
+                        <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 10 }}>
+                          <div style={contactRowLabel}>Email:</div>
+                          <div style={{ fontSize: 13, color: "#3a77e3", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <a
+                              href={`mailto:${c.ContactEmail}`}
+                              title={c.ContactEmail}
+                              style={{ color: "inherit", textDecoration: "none" }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {c.ContactEmail}
+                            </a>
+                          </div>
+                          <label
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 500, color: "#555", cursor: "pointer", userSelect: "none", marginLeft: 6 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!c.EmailSent}
+                              onChange={async (e) => {
+                                e.stopPropagation();
+                                const newVal = e.target.checked;
+                                setLead((prev) => prev ? ({
+                                  ...prev,
+                                  Contacts: (prev.Contacts || []).map((ct, idx) =>
+                                    idx === originalIndex ? { ...ct, EmailSent: newVal } : ct
+                                  ),
+                                }) : prev);
+                                await fetch(
+                                  `/api/employees/leads/${lead.LeadId}/contacts/${c.LeadContactID}`,
+                                  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ EmailSent: newVal }) }
+                                );
+                              }}
+                              style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                            />
+                            Email Sent
+                          </label>
+                        </div>
+                      )}
+
+                      {c.LinkedInProfile && (
+                        <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6, gap: 10 }}>
+                          <div style={contactRowLabel}>LinkedIn:</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, color: "#3a77e3", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <a
+                                href={`https://${c.LinkedInProfile}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={c.LinkedInProfile}
+                                style={{ color: "inherit", textDecoration: "none" }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {c.LinkedInProfile}
+                              </a>
+                            </div>
+                            <div style={{ display: "flex", gap: 14 }}>
+                              {(
+                                [
+                                  { key: "LinkedInRequestSent" as const, label: "Request Sent" },
+                                  { key: "LinkedInRequestAccepted" as const, label: "Request Accepted" },
+                                ]
+                              ).map(({ key, label }) => (
+                                <label
+                                  key={key}
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 500, color: "#555", cursor: "pointer", userSelect: "none" }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={!!c[key]}
+                                    onChange={async (e) => {
+                                      e.stopPropagation();
+                                      const newVal = e.target.checked;
+                                      setLead((prev) => prev ? ({
+                                        ...prev,
+                                        Contacts: (prev.Contacts || []).map((ct, idx) =>
+                                          idx === originalIndex ? { ...ct, [key]: newVal } : ct
+                                        ),
+                                      }) : prev);
+                                      await fetch(
+                                        `/api/employees/leads/${lead.LeadId}/contacts/${c.LeadContactID}`,
+                                        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: newVal }) }
+                                      );
+                                    }}
+                                    style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                                  />
+                                  {label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Add Activity button – only on selected card */}
+                      {isSelected && (
+                        <div style={{ marginTop: 8 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowAddActivity(true);
+                            }}
+                            style={{
+                              padding: "5px 14px",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: "#1e90ff",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: 5,
+                              cursor: "pointer",
+                            }}
+                          >
+                            + Add Activity
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
+                );
+              })}
+
+            {/* Empty state */}
+            {(lead.Contacts || []).filter((c) =>
+              (c.ContactName || "")
+                .toLowerCase()
+                .includes(contactSearch.toLowerCase())
+            ).length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "#999",
+                  fontSize: 13,
+                  padding: "20px 0",
+                }}
+              >
+                No contacts found.
               </div>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
       </div>
 
@@ -1387,6 +1705,7 @@ export default function LeadDetailsPage({
               <th style={{ ...thStyle, width: 200 }}>Activity Date</th>
               <th style={{ ...thStyle, width: 120 }}>Mode</th>
               <th style={{ ...thStyle }}>Notes</th>
+              <th style={{ ...thStyle, width: 160 }}>Contact</th>
               <th style={{ ...thStyle, width: 120 }}>Status</th>
             </tr>
           </thead>
@@ -1439,6 +1758,9 @@ export default function LeadDetailsPage({
                     a.Notes || "—"
                   )}
                 </td>
+
+                {/* Contact */}
+                <td style={tdStyle}>{a.ContactName || "—"}</td>
 
                 {/* Status */}
                 <td
@@ -1674,6 +1996,20 @@ export default function LeadDetailsPage({
 
             {/* Body */}
             <div style={modalBody}>
+              <label style={{ fontWeight: 500 }}>Contact</label>
+              <input
+                style={{
+                  ...inputBox,
+                  width: 480,
+                  background: "#f1f5f9",
+                  color: "#64748b",
+                  cursor: "not-allowed",
+                }}
+                value={selectedActivityContact?.ContactName || "No contact selected"}
+                readOnly
+                disabled
+              />
+
               <label style={{ fontWeight: 500 }}>Activity Type*</label>
               <select
                 style={{ ...inputBox, width: 480 }}
@@ -1700,13 +2036,15 @@ export default function LeadDetailsPage({
                 }
               >
                 <option value="">-- Select Status --</option>
-                <option value="New">New</option>
-                <option value="Contacted">Contacted</option>
-                <option value="Follow-up">Follow-up</option>
-                <option value="Qualified">Qualified</option>
-                <option value="Unqualified">Unqualified</option>
-                <option value="Lost">Lost</option>
-                <option value="Converted">Converted</option>
+                {leadStatuses.map((status) => (
+                  <option
+                    key={status.StatusId}
+                    value={status.StatusName}
+                    title={status.StatusDesc}
+                  >
+                    {status.StatusName}
+                  </option>
+                ))}
               </select>
 
               <label style={{ fontWeight: 500 }}>Notes*</label>
@@ -2818,9 +3156,11 @@ export default function LeadDetailsPage({
 
 const backBtnStyle: React.CSSProperties = {
   padding: "8px 12px",
-  borderRadius: 6,
+  borderRadius: 8,
   border: "none",
-  background: "#efefef",
+  background: "#3a77e3",
+  color: "#fff",
+  fontWeight: 600,
   cursor: "pointer",
 };
 
@@ -2835,3 +3175,16 @@ const oppTd: React.CSSProperties = {
   padding: "8px 10px",
   borderBottom: "1px solid #f1f5f9",
 };
+
+const dropdownItem: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  padding: "8px 10px",
+  background: "none",
+  border: "none",
+  textAlign: "left",
+  cursor: "pointer",
+  borderRadius: "4px",
+  color: "#3a77e3",
+};
+

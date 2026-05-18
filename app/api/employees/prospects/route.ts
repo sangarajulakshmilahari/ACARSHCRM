@@ -1,22 +1,32 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "../../../../config/db";
+import { getAuthUser } from "../../lib/auth";
 
 
   //  GET — FETCH PROSPECT LEADS
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const pool = await getPool();
 
-    const [rows]: any = await pool.query(`
+    const isAdmin = authUser.roleId === 1;
+    const baseQuery = `
       SELECT
         l.LeadId,
         l.CompanyName,
         l.CompanyLocation,
         l.LeadSource,
         l.LeadDate,
+        l.CreatedOn,
         l.LeadNotes,
-        ls.StatusName,
+        COALESCE(las.StatusName, ls.StatusName) AS StatusName,
+        latestActivity.ActivityId AS LatestActivityId,
+        latestActivity.Notes AS LatestActivityNotes,
         lc.ContactName,
         lc.ContactTitle,
         lc.ContactEmail,
@@ -36,8 +46,33 @@ export async function GET() {
         ON l.OwnerId = u.UserId
       LEFT JOIN AccountTypes at
         ON l.AccountTypeId = at.AccountTypeId
+      LEFT JOIN (
+        SELECT LeadId, ActivityId, StatusId, Notes
+        FROM (
+          SELECT
+            la.LeadId,
+            la.ActivityId,
+            la.StatusId,
+            la.Notes,
+            ROW_NUMBER() OVER (
+              PARTITION BY la.LeadId
+              ORDER BY la.ActivityDate DESC, la.CreatedOn DESC, la.ActivityId DESC
+            ) AS rn
+          FROM LeadActivities la
+        ) rankedActivities
+        WHERE rn = 1
+      ) latestActivity
+        ON latestActivity.LeadId = l.LeadId
+      LEFT JOIN LeadStatuses las
+        ON latestActivity.StatusId = las.StatusId
       WHERE at.Name = 'Prospect'
-    `);
+      ${isAdmin ? "" : "AND l.OwnerId = ?"}
+    `;
+
+    const [rows]: any = await pool.query(
+      baseQuery,
+      isAdmin ? [] : [authUser.userId]
+    );
 
     const grouped: any = {};
 
@@ -49,8 +84,11 @@ export async function GET() {
           CompanyLocation: row.CompanyLocation,
           LeadSource: row.LeadSource,
           LeadDate: row.LeadDate,
+          CreatedOn: row.CreatedOn,
           LeadNotes: row.LeadNotes,
           StatusName: row.StatusName,
+          LatestActivityId: row.LatestActivityId,
+          LatestActivityNotes: row.LatestActivityNotes,
           OwnerName: row.OwnerName,
           AccountTypeId: row.AccountTypeId,
           Name: row.Name,

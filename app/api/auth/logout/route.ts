@@ -9,6 +9,9 @@ export async function GET() {
       "http://localhost:3000/api/auth/login"
     )}`;
 
+    console.log(process.env.KEYCLOAK_URL);
+
+
   const res = NextResponse.redirect(keycloakLogoutUrl);
 
   // Clear our app cookie

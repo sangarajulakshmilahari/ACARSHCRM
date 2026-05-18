@@ -1,27 +1,48 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Chart } from "chart.js/auto";
+
+type OutreachAnalytics = {
+  totalLinkedInRequestsSent: number;
+  totalLinkedInRequestsAccepted: number;
+  totalEmailsSent: number;
+  acceptanceRate: number;
+  engagementEfficiency: number;
+};
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState<number>(0);
   const [statusCounts, setStatusCounts] = useState<Record<number, number>>({});
-  const [leadsByStatus, setLeadsByStatus] = useState<
-    { StatusName: string; count: number }[]
-  >([]);
   const [leadsByOwner, setLeadsByOwner] = useState<
     { OwnerName: string; count: number }[]
   >([]);
   const [monthlyTrends, setMonthlyTrends] = useState<
-    { MonthYear: string; OwnerName: string; count: number }[]
+    {
+      MonthYear: string;
+      YearNum: number;
+      MonthNum: number;
+      OwnerName: string;
+      count: number;
+    }[]
   >([]);
+  const [outreachAnalytics, setOutreachAnalytics] = useState<OutreachAnalytics>({
+    totalLinkedInRequestsSent: 0,
+    totalLinkedInRequestsAccepted: 0,
+    totalEmailsSent: 0,
+    acceptanceRate: 0,
+    engagementEfficiency: 0,
+  });
+  const [isDarkTheme, setIsDarkTheme] = useState(false);
 
-  const statusRef = useRef<HTMLCanvasElement>(null);
+  const outreachDonutRef = useRef<HTMLCanvasElement>(null);
+  const outreachBarRef = useRef<HTMLCanvasElement>(null);
   const ownerRef = useRef<HTMLCanvasElement>(null);
   const monthlyRef = useRef<HTMLCanvasElement>(null);
 
-  const statusChart = useRef<Chart | null>(null);
+  const outreachDonutChart = useRef<Chart | null>(null);
+  const outreachBarChart = useRef<Chart | null>(null);
   const ownerChart = useRef<Chart | null>(null);
   const monthlyChart = useRef<Chart | null>(null);
 
@@ -29,55 +50,154 @@ export default function DashboardPage() {
     fetch("/api/dashboard")
       .then((res) => res.json())
       .then((data) => {
-        setTotalLeads(data.totalLeads);
+        setTotalLeads(Number(data.totalLeads ?? 0));
 
         const map: Record<number, number> = {};
-        data.statusCounts.forEach((s: any) => {
+        (data.statusCounts || []).forEach((s: any) => {
           map[s.StatusId] = s.count;
         });
 
         setStatusCounts(map);
-        setLeadsByStatus(data.leadsByStatus);
-        setLeadsByOwner(data.leadsByOwner);
-        setMonthlyTrends(data.monthlyTrends);
-
-        setLoading(false); 
-      });
+        setLeadsByOwner(data.leadsByOwner || []);
+        setMonthlyTrends(data.monthlyTrends || []);
+        setOutreachAnalytics({
+          totalLinkedInRequestsSent: Number(
+            data?.outreachAnalytics?.totalLinkedInRequestsSent ?? 0
+          ),
+          totalLinkedInRequestsAccepted: Number(
+            data?.outreachAnalytics?.totalLinkedInRequestsAccepted ?? 0
+          ),
+          totalEmailsSent: Number(data?.outreachAnalytics?.totalEmailsSent ?? 0),
+          acceptanceRate: Number(data?.outreachAnalytics?.acceptanceRate ?? 0),
+          engagementEfficiency: Number(
+            data?.outreachAnalytics?.engagementEfficiency ?? 0
+          ),
+        });
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!statusRef.current || leadsByStatus.length === 0) return;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    setIsDarkTheme(mediaQuery.matches);
 
-    statusChart.current?.destroy();
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsDarkTheme(e.matches);
+    };
 
-    statusChart.current = new Chart(statusRef.current, {
-      type: "bar",
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+  }, []);
+
+  const rollingMonths = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      year: "numeric",
+    });
+
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+
+    return Array.from({ length: 13 }, (_, index) => {
+      const d = new Date(start.getFullYear(), start.getMonth() + index, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return {
+        label: formatter.format(d),
+        key,
+      };
+    });
+  }, []);
+
+  const months = useMemo(() => rollingMonths.map((m) => m.label), [rollingMonths]);
+
+  const owners = useMemo(
+    () => Array.from(new Set(monthlyTrends.map((m) => m.OwnerName))),
+    [monthlyTrends]
+  );
+
+  const monthlyDatasets = useMemo(
+    () =>
+      owners.map((owner, index) => ({
+        label: owner,
+        data: rollingMonths.map((monthRef) => {
+          const record = monthlyTrends.find(
+            (m) =>
+              `${m.YearNum}-${String(m.MonthNum).padStart(2, "0")}` === monthRef.key &&
+              m.OwnerName === owner
+          );
+          return record ? record.count : 0;
+        }),
+        backgroundColor: ["#007bff", "#28a745", "#ffc107", "#dc3545", "#17a2b8"][
+          index % 5
+        ],
+      })),
+    [owners, monthlyTrends, rollingMonths]
+  );
+
+  const sent = outreachAnalytics.totalLinkedInRequestsSent;
+  const accepted = outreachAnalytics.totalLinkedInRequestsAccepted;
+  const pending = Math.max(sent - accepted, 0);
+
+  useEffect(() => {
+    if (!outreachDonutRef.current) return;
+    outreachDonutChart.current?.destroy();
+
+    outreachDonutChart.current = new Chart(outreachDonutRef.current, {
+      type: "doughnut",
       data: {
-        labels: leadsByStatus.map((s) => s.StatusName), 
+        labels: ["Accepted", "Pending"],
         datasets: [
           {
-            label: " No.of Leads",
-            data: leadsByStatus.map((s) => s.count), 
-            backgroundColor: [
-              "#28a745",
-              "#17a2b8",
-              "#ffc107",
-              "#007bff",
-              "#6c757d",
-              "#dc3545",
-              "#20c997",
+            data: [accepted, pending],
+            backgroundColor: ["#34d399", "#60a5fa"],
+            borderColor: isDarkTheme ? "#0f172a" : "#ffffff",
+            borderWidth: 3,
+            hoverOffset: 7,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "66%",
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              usePointStyle: true,
+              boxWidth: 8,
+            },
+          },
+        },
+      },
+    });
+
+    return () => {
+      outreachDonutChart.current?.destroy();
+    };
+  }, [accepted, pending, isDarkTheme]);
+
+  useEffect(() => {
+    if (!outreachBarRef.current) return;
+    outreachBarChart.current?.destroy();
+
+    outreachBarChart.current = new Chart(outreachBarRef.current, {
+      type: "bar",
+      data: {
+        labels: ["LinkedIn Sent", "Accepted", "Emails"],
+        datasets: [
+          {
+            label: "Outreach Volume",
+            data: [
+              outreachAnalytics.totalLinkedInRequestsSent,
+              outreachAnalytics.totalLinkedInRequestsAccepted,
+              outreachAnalytics.totalEmailsSent,
             ],
-            borderRadius: 1,
-            borderColor: [
-              "#1e7e34",
-              "#138496",
-              "#e0a800",
-              "#0056b3",
-              "#545b62",
-              "#bd2130",
-              "#1a9b7d",
-            ],
-            borderWidth: 2,
+            backgroundColor: ["#3b82f6", "#10b981", "#f97316"],
+            borderRadius: 8,
+            borderSkipped: false,
           },
         ],
       },
@@ -91,58 +211,43 @@ export default function DashboardPage() {
           y: {
             beginAtZero: true,
             ticks: {
-              stepSize: 10,
               precision: 0,
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
             },
-            title: {
-              display: true,
+            grid: {
+              color: isDarkTheme
+                ? "rgba(148,163,184,0.22)"
+                : "rgba(148,163,184,0.16)",
             },
           },
           x: {
-            title: {
-              display: true,
+            ticks: {
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
             },
+            grid: { display: false },
           },
         },
       },
     });
 
     return () => {
-      statusChart.current?.destroy();
+      outreachBarChart.current?.destroy();
     };
-  }, [leadsByStatus]);
+  }, [outreachAnalytics, isDarkTheme]);
 
   useEffect(() => {
     if (!ownerRef.current || leadsByOwner.length === 0) return;
 
     ownerChart.current?.destroy();
-
     ownerChart.current = new Chart(ownerRef.current, {
       type: "bar",
-
       data: {
-        labels: leadsByOwner.map((o) => o.OwnerName), 
+        labels: leadsByOwner.map((o) => o.OwnerName),
         datasets: [
           {
-            data: leadsByOwner.map((o) => o.count), 
-            backgroundColor: [
-              "#007bff",
-              "#28a745",
-              "#ffc107",
-              "#dc3545",
-              "#17a2b8",
-            ],
-
-            borderColor: [
-              "#0056b3",
-              "#1e7e34",
-              "#e0a800",
-              "#bd2130",
-              "#138496",
-              "#5a2d91",
-              "#e8590c",
-              "#1a9b7d",
-            ],
+            data: leadsByOwner.map((o) => o.count),
+            backgroundColor: ["#007bff", "#28a745", "#ffc107", "#dc3545", "#17a2b8"],
+            borderColor: ["#0056b3", "#1e7e34", "#e0a800", "#bd2130", "#138496"],
             borderWidth: 3,
             borderRadius: 2,
           },
@@ -155,14 +260,25 @@ export default function DashboardPage() {
         scales: {
           y: {
             beginAtZero: true,
-            ticks: { stepSize: 5, precision: 0 },
-            title: {
-              display: true,
+            ticks: {
+              stepSize: 5,
+              precision: 0,
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+            },
+            grid: {
+              color: isDarkTheme
+                ? "rgba(148,163,184,0.22)"
+                : "rgba(148,163,184,0.16)",
             },
           },
           x: {
-            title: {
-              display: true,
+            ticks: {
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+            },
+            grid: {
+              color: isDarkTheme
+                ? "rgba(148,163,184,0.22)"
+                : "rgba(148,163,184,0.16)",
             },
           },
         },
@@ -172,48 +288,17 @@ export default function DashboardPage() {
     return () => {
       ownerChart.current?.destroy();
     };
-  }, [leadsByOwner]);
-
-  const months = [
-    "Jan 2025",
-    "Feb 2025",
-    "Mar 2025",
-    "Apr 2025",
-    "May 2025",
-    "Jun 2025",
-    "Jul 2025",
-    "Aug 2025",
-    "Sep 2025",
-    "Oct 2025",
-    "Nov 2025",
-    "Dec 2025",
-  ];
-
-  const owners = Array.from(new Set(monthlyTrends.map((m) => m.OwnerName)));
-
-  const datasets = owners.map((owner, index) => ({
-    label: owner,
-    data: months.map((month) => {
-      const record = monthlyTrends.find(
-        (m) => m.MonthYear === month && m.OwnerName === owner
-      );
-      return record ? record.count : 0;
-    }),
-    backgroundColor: ["#007bff", "#28a745", "#ffc107", "#dc3545", "#17a2b8"][
-      index % 5
-    ],
-  }));
+  }, [leadsByOwner, isDarkTheme]);
 
   useEffect(() => {
-    if (!monthlyRef.current || monthlyTrends.length === 0) return;
+    if (!monthlyRef.current) return;
 
     monthlyChart.current?.destroy();
-
     monthlyChart.current = new Chart(monthlyRef.current, {
       type: "bar",
       data: {
-        labels: months, 
-        datasets,
+        labels: months,
+        datasets: monthlyDatasets,
       },
       options: {
         responsive: true,
@@ -222,7 +307,7 @@ export default function DashboardPage() {
           tooltip: {
             callbacks: {
               title: (items) => items[0].label,
-              label: (item) => `${item.dataset.label}: ${item.raw}`, 
+              label: (item) => `${item.dataset.label}: ${item.raw}`,
             },
           },
         },
@@ -232,14 +317,22 @@ export default function DashboardPage() {
             ticks: {
               stepSize: 5,
               precision: 0,
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
             },
-            title: {
-              display: true,
+            grid: {
+              color: isDarkTheme
+                ? "rgba(148,163,184,0.22)"
+                : "rgba(148,163,184,0.16)",
             },
           },
           x: {
-            title: {
-              display: true,
+            ticks: {
+              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+            },
+            grid: {
+              color: isDarkTheme
+                ? "rgba(148,163,184,0.22)"
+                : "rgba(148,163,184,0.16)",
             },
           },
         },
@@ -249,7 +342,7 @@ export default function DashboardPage() {
     return () => {
       monthlyChart.current?.destroy();
     };
-  }, [monthlyTrends]);
+  }, [monthlyTrends, monthlyDatasets, isDarkTheme]);
 
   if (loading) {
     return (
@@ -264,15 +357,13 @@ export default function DashboardPage() {
           fontWeight: 500,
           color: "#6b7280",
         }}
-      >
-        {/* Loading dashboard... */}
-      </div>
+      ></div>
     );
   }
+
   return (
     <>
       <div className="dashboard-container">
-        {/* HEADER */}
         <div className="dashboard-header">
           <p style={{ fontSize: "25px", fontWeight: 600 }}>Leads Dashboard</p>
           <div className="total-count">
@@ -280,36 +371,18 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* STATUS CARDS */}
         <div className="status-cards-grid">
           {[
             { id: 1, cls: "new", icon: "fa-star", label: "New" },
             { id: 2, cls: "contacted", icon: "fa-phone", label: "Contacted" },
             { id: 3, cls: "followup", icon: "fa-clock", label: "Follow-Up" },
-            {
-              id: 4,
-              cls: "qualified",
-              icon: "fa-thumbs-up",
-              label: "Qualified",
-            },
-            {
-              id: 5,
-              cls: "unqualified",
-              icon: "fa-thumbs-down",
-              label: "Unqualified",
-            },
+            { id: 4, cls: "qualified", icon: "fa-thumbs-up", label: "Qualified" },
+            { id: 5, cls: "unqualified", icon: "fa-thumbs-down", label: "Unqualified" },
             { id: 6, cls: "lost", icon: "fa-times-circle", label: "Lost" },
-            {
-              id: 7,
-              cls: "converted",
-              icon: "fa-check-circle",
-              label: "Converted",
-            },
+            { id: 7, cls: "converted", icon: "fa-check-circle", label: "Converted" },
           ].map(({ id, cls, icon, label }) => {
             const count = statusCounts[id] || 0;
-            const percentage = totalLeads
-              ? ((count / totalLeads) * 100).toFixed(1)
-              : "0";
+            const percentage = totalLeads ? ((count / totalLeads) * 100).toFixed(1) : "0";
 
             return (
               <div key={id} className={`status-card ${cls}`}>
@@ -326,14 +399,60 @@ export default function DashboardPage() {
           })}
         </div>
 
-        {/* CHARTS */}
         <div className="charts-row">
-          <div className="chart-card">
-            <div className="chart-header">
-              <h3>Leads By Status</h3>
+          <div className="chart-card outreach-experiment">
+            {/* <div className="chart-header">
+                <h3>Outreach Analytics</h3>
+                <p className="chart-subtitle">
+                    Experimental visualization for outreach volume, conversion, and engagement.
+                </p>
+            </div> */}
+
+            <div className="outreach-kpis">
+              <div className="kpi kpi-sent">
+                <span>LinkedIn Sent</span>
+                <strong>{outreachAnalytics.totalLinkedInRequestsSent}</strong>
+              </div>
+              <div className="kpi kpi-accepted">
+                <span>Accepted</span>
+                <strong>{outreachAnalytics.totalLinkedInRequestsAccepted}</strong>
+              </div>
+              <div className="kpi kpi-emails">
+                <span>Emails</span>
+                <strong>{outreachAnalytics.totalEmailsSent}</strong>
+              </div>
+              <div className="kpi kpi-eff">
+                <span>LinkedIn Acceptance Rate</span>
+                <strong>{outreachAnalytics.engagementEfficiency}%</strong>
+              </div>
             </div>
-            <div className="chart-container">
-              <canvas ref={statusRef} />
+
+            <div className="conversion-progress">
+              <div className="conversion-head">
+                <span>Sent → Accepted conversion</span>
+                <strong>{outreachAnalytics.acceptanceRate}%</strong>
+              </div>
+              <div className="track">
+                <div
+                  className="fill"
+                  style={{ width: `${Math.min(outreachAnalytics.acceptanceRate, 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="outreach-grid">
+              <div className="mini-chart">
+                <h4>Conversion Split</h4>
+                <div className="mini-canvas">
+                  <canvas ref={outreachDonutRef} />
+                </div>
+              </div>
+              <div className="mini-chart">
+                <h4>Outreach Mix</h4>
+                <div className="mini-canvas">
+                  <canvas ref={outreachBarRef} />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -359,8 +478,8 @@ export default function DashboardPage() {
 
       <style jsx>{`
         .dashboard-container {
-          padding: 20px;
-          background: #f8f9fa;
+          padding: 22px;
+          background: #f6f8fc;
           min-height: 100vh;
         }
         .dashboard-header {
@@ -368,9 +487,10 @@ export default function DashboardPage() {
           justify-content: space-between;
           align-items: center;
           background: #fff;
-          padding: 1px 14px;
+          padding: 4px 16px;
           border-radius: 12px;
-          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          border: 1px solid #e7edf6;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
         }
         .total-count {
           background: #007bff;
@@ -387,9 +507,10 @@ export default function DashboardPage() {
         }
         .status-card {
           background: #fff;
-          padding: 10px;
-          border-radius: 8px;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          padding: 12px;
+          border-radius: 10px;
+          border: 1px solid #e8eef8;
+          box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
           text-align: center;
           position: relative;
         }
@@ -449,7 +570,8 @@ export default function DashboardPage() {
           background: #fff;
           padding: 20px;
           border-radius: 12px;
-          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          border: 1px solid #e7edf6;
+          box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
         }
         .chart-card.full {
           margin-top: 20px;
@@ -457,15 +579,116 @@ export default function DashboardPage() {
         .chart-header {
           text-align: center;
           border-bottom: 2px solid #f1f3f4;
-          margin-bottom: 15px;
+          margin-bottom: 16px;
+          padding-bottom: 2px;
+        }
+        .chart-subtitle {
+          margin-top: -6px;
+          margin-bottom: 10px;
+          font-size: 12px;
+          color: #64748b;
+          font-weight: 500;
         }
         .chart-container {
           height: 280px;
         }
 
+        .outreach-experiment {
+          background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        }
+        .outreach-kpis {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        .kpi {
+          border: 1px solid #e5ebf4;
+          border-radius: 10px;
+          padding: 11px;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        }
+        .kpi span {
+          display: block;
+          font-size: 11px;
+          color: #64748b;
+          margin-bottom: 4px;
+          font-weight: 600;
+        }
+        .kpi strong {
+          font-size: 21px;
+          color: #0f172a;
+          line-height: 1;
+        }
+        .kpi-sent {
+          background: rgba(59, 130, 246, 0.08);
+        }
+        .kpi-accepted {
+          background: rgba(16, 185, 129, 0.1);
+        }
+        .kpi-emails {
+          background: rgba(249, 115, 22, 0.1);
+        }
+        .kpi-eff {
+          background: rgba(168, 85, 247, 0.1);
+        }
+        .conversion-progress {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 10px;
+          margin-bottom: 12px;
+          background: #fff;
+        }
+        .conversion-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+          font-size: 12px;
+          color: #334155;
+        }
+        .conversion-head strong {
+          color: #2563eb;
+          font-size: 14px;
+        }
+        .track {
+          height: 10px;
+          background: #e2e8f0;
+          border-radius: 999px;
+          overflow: hidden;
+        }
+        .fill {
+          height: 100%;
+          background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
+          border-radius: 999px;
+          transition: width 0.3s ease;
+        }
+        .outreach-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+        }
+        .mini-chart {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 10px;
+          background: #fff;
+        }
+        .mini-chart h4 {
+          margin: 0 0 8px;
+          font-size: 13px;
+          color: #0f172a;
+        }
+        .mini-canvas {
+          height: 200px;
+        }
+
         @media (max-width: 1024px) {
           .status-cards-grid {
             grid-template-columns: repeat(4, 1fr);
+          }
+          .outreach-kpis {
+            grid-template-columns: repeat(2, 1fr);
           }
         }
         @media (max-width: 768px) {
@@ -475,7 +698,11 @@ export default function DashboardPage() {
           .status-cards-grid {
             grid-template-columns: repeat(2, 1fr);
           }
+          .outreach-grid {
+            grid-template-columns: 1fr;
+          }
         }
+
         .new .status-icon {
           color: #28a745;
         }
@@ -497,7 +724,46 @@ export default function DashboardPage() {
         .converted .status-icon {
           color: #20c997;
         }
+
+        @media (prefers-color-scheme: dark) {
+          .dashboard-container {
+            background: #020617;
+          }
+          .dashboard-header,
+          .status-card,
+          .chart-card,
+          .mini-chart,
+          .conversion-progress {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-color: #1e293b;
+            box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
+          }
+          .chart-header {
+            border-bottom-color: #1e293b;
+          }
+          .chart-subtitle,
+          .kpi span,
+          .percentage,
+          .conversion-head {
+            color: #94a3b8;
+          }
+          .kpi,
+          .mini-chart {
+            border-color: #1e293b;
+            background: #0f172a;
+          }
+          .kpi strong,
+          .mini-chart h4,
+          .status-content h4 {
+            color: #e2e8f0;
+          }
+          .track {
+            background: #1e293b;
+          }
+        }
       `}</style>
     </>
   );
 }
+

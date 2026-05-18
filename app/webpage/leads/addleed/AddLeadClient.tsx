@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Select from "react-select";
+import CreatableSelect from "react-select/creatable";
 
 type EntityType = "lead" | "prospect" | "account";
 
@@ -24,6 +26,13 @@ export default function AddLeadPage({
 
   const entityLabelLower = entityLabel.toLowerCase();
 
+ const companyOptions = companies
+  .filter((c) => c.CompanyName)
+  .map((c) => ({
+    label: c.CompanyName,
+    value: c.CompanyName,
+  }));
+
   const getAccountType = (type: EntityType) => {
     if (type === "lead") return 10;
     if (type === "prospect") return 20;
@@ -31,10 +40,12 @@ export default function AddLeadPage({
     return 10;
   };
 
+  
+
   const handleChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
+    >,
   ) => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
@@ -59,8 +70,9 @@ export default function AddLeadPage({
     CompanyName: "",
     CompanyLocation: "",
     LeadSource: "",
+    IndustryFocus: "",
     LeadDate: getTodayDate(),
-    StatusName: "New",
+    StatusName: "",
     OwnerName: "",
     AccountType: getAccountType(type),
 
@@ -77,6 +89,7 @@ export default function AddLeadPage({
     ContactRoleName: "",
     ContactLocation: "",
     ContactNotes: "",
+    LinkedInURL: "",
 
     // Quick Actions
     AddReminder: false,
@@ -90,9 +103,22 @@ export default function AddLeadPage({
       .then((data) => {
         if (data.companies) {
           setCompanies(data.companies);
+        }
+        if (data.leadSources) {
           setLeadSources(data.leadSources);
+        }
+        if (data.ownername) {
           setOwnerNames(data.ownername);
+        }
+        if (data.Role) {
           setContactRoles(data.Role);
+        }
+        if (Array.isArray(data.leadStatuses)) {
+          setForm((prev) => ({
+            ...prev,
+            StatusName:
+              prev.StatusName || data.leadStatuses[0]?.StatusName || "",
+          }));
         }
       });
   }, []);
@@ -126,10 +152,34 @@ export default function AddLeadPage({
     alert(`${entityLabel} added successfully!`);
   };
 
+const customSelectStyles = {
+  control: (base: any) => ({
+    ...base,
+    minHeight: "38px",
+    height: "38px",
+    borderRadius: "8px",
+    borderColor: "#d8e1ef",
+    fontSize: "13px",
+  }),
+  valueContainer: (base: any) => ({
+    ...base,
+    padding: "0 10px",   // match input padding
+  }),
+  input: (base: any) => ({
+    ...base,
+    margin: 0,
+    padding: 0,
+  }),
+  indicatorsContainer: (base: any) => ({
+    ...base,
+    height: "34px",
+  }),
+};
+
   return (
     <div
       style={{
-        padding: 20,
+        padding: 22,
         fontFamily: "Segoe UI, system-ui, sans-serif",
         width: "100%",
         overflowY: "auto",
@@ -157,12 +207,13 @@ export default function AddLeadPage({
           style={{
             background: "#f56c00",
             color: "white",
-            padding: "8px 16px",
-            borderRadius: 6,
+            padding: "9px 16px",
+            borderRadius: 8,
             border: "none",
             cursor: "pointer",
             fontSize: 14,
-            fontWeight: 500,
+            fontWeight: 600,
+            boxShadow: "0 6px 14px rgba(245, 108, 0, 0.25)",
           }}
         >
           ← Back
@@ -180,21 +231,37 @@ export default function AddLeadPage({
                 <label style={labelStyle}>
                   Company Name <span style={{ color: "#ef4444" }}>*</span>
                 </label>
-                <select
-                  name="CompanyName"
-                  value={form.CompanyName}
-                  onChange={handleChange}
-                  style={inputStyle}
-                >
-                  <option value="">Select Company</option>
+                <div style={{ marginTop: 4 }}>
+                <CreatableSelect
+                 styles={customSelectStyles}
+                  options={companyOptions}
+                  value={
+                    form.CompanyName
+                      ? { label: form.CompanyName, value: form.CompanyName }
+                      : null
+                  }
+                  onChange={(selected: any) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      CompanyName: selected ? selected.value : "",
+                    }));
+                  }}
+                  onCreateOption={(inputValue) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      CompanyName: inputValue,
+                    }));
+                  }}
+                  
+                  placeholder="Select or type company..."
+                  formatCreateLabel={(inputValue) => `Add "${inputValue}"`}
+                  isClearable
+                />
+                </div>
 
-                  {Array.isArray(companies) &&
-                    companies.map((c, index) => (
-                      <option key={index} value={c.CompanyName}>
-                        {c.CompanyName}
-                      </option>
-                    ))}
-                </select>
+                <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+  Type to search or press Enter to add new company
+</p>
               </div>
 
               <div>
@@ -205,6 +272,18 @@ export default function AddLeadPage({
                   placeholder="City, State"
                   style={inputStyle}
                   value={form.CompanyLocation}
+                  onChange={handleChange}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Industry Focus</label>
+                <input
+                  type="text"
+                  name="IndustryFocus"
+                  placeholder="e.g., Healthcare, Fintech"
+                  style={inputStyle}
+                  value={form.IndustryFocus}
                   onChange={handleChange}
                 />
               </div>
@@ -441,6 +520,18 @@ export default function AddLeadPage({
                 />
               </div>
 
+              <div>
+                <label style={labelStyle}>LinkedIn URL</label>
+                <input
+                  type="text"
+                  name="LinkedInURL"
+                  placeholder="https://linkedin.com/in/..."
+                  style={inputStyle}
+                  value={form.LinkedInURL}
+                  onChange={handleChange}
+                />
+              </div>
+
               <div style={{ gridColumn: "1 / span 3" }}>
                 <label style={labelStyle}>Contact Notes</label>
                 <textarea
@@ -555,15 +646,15 @@ const labelStyle: React.CSSProperties = {
 };
 
 const sectionBody: React.CSSProperties = {
-  padding: 20,
+  padding: 22,
   overflowY: "auto",
 };
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "8px 10px",
-  borderRadius: 6,
-  border: "1px solid #d1d5db",
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: "1px solid #d8e1ef",
   marginTop: 4,
   fontSize: 13,
   boxSizing: "border-box",
@@ -571,9 +662,9 @@ const inputStyle: React.CSSProperties = {
 
 const textareaStyle: React.CSSProperties = {
   width: "100%",
-  padding: "8px 10px",
-  borderRadius: 6,
-  border: "1px solid #d1d5db",
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: "1px solid #d8e1ef",
   marginTop: 4,
   height: 80,
   fontSize: 13,
@@ -583,23 +674,23 @@ const textareaStyle: React.CSSProperties = {
 
 const grid3: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 20,
 };
 
 const boxWrapper: React.CSSProperties = {
   marginTop: 20,
   background: "#ffffff",
-  borderRadius: 10,
-  boxShadow: "0 0 6px rgba(0,0,0,0.06)",
+  borderRadius: 12,
+  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
   padding: 0,
-  border: "1px solid #e5e7eb",
+  border: "1px solid #e7edf6",
 };
 
 const boxHeader: React.CSSProperties = {
-  background: "#3a77e3",
+  background: "linear-gradient(90deg, #3a77e3 0%, #2459d3 100%)",
   color: "#fff",
-  padding: "10px 16px",
+  padding: "11px 16px",
   fontWeight: 600,
   borderTopLeftRadius: 10,
   borderTopRightRadius: 10,
@@ -609,23 +700,22 @@ const boxHeader: React.CSSProperties = {
 const btnPrimary: React.CSSProperties = {
   background: "#3a77e3",
   color: "white",
+  padding: "10px 20px",
+  fontSize: 14,
+  borderRadius: 8,
+  border: "none",
+  cursor: "pointer",
+  fontWeight: 600,
+  boxShadow: "0 8px 20px rgba(58, 119, 227, 0.24)",
+};
+
+const btnSecondary: React.CSSProperties = {
+  background: "#e2e8f0",
+  color: "#334155",
   padding: "10px 18px",
   fontSize: 14,
-  borderRadius: 6,
+  borderRadius: 8,
   border: "none",
   cursor: "pointer",
   fontWeight: 600,
 };
-
-
-const btnSecondary: React.CSSProperties = {
-  background: "#6b7280",
-  color: "white",
-  padding: "10px 18px",
-  fontSize: 14,
-  borderRadius: 6,
-  border: "none",
-  cursor: "pointer",
-  fontWeight: 500,
-};
-

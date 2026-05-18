@@ -4,8 +4,15 @@
 import { fuzzyMatch, fuzzyMatchDropdown } from "../utils/fuzzy-match";
 
 // ─── SEARCH LEADS ───
+// ═══════════════════════════════════════════════════
+// REPLACE the searchLead function in your lead-tool.ts with this:
+// ═══════════════════════════════════════════════════
+
 export async function searchLead(pool: any, query: string) {
+  // Create multiple search variations to handle spacing issues
+  // "open text" should match "Opentext", "OpenText", "Open Text"
   const searchTerm = `%${query}%`;
+  const noSpaces = `%${query.replace(/\s+/g, "")}%`; // "opentext"
 
   const [rows]: any = await pool.query(
     `
@@ -21,21 +28,24 @@ export async function searchLead(pool: any, query: string) {
       lc.ContactName,
       lc.ContactEmail,
       lc.ContactPhone
-    FROM Leads l
+    FROM leads l
     LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
     LEFT JOIN Users u ON l.OwnerId = u.UserId
     LEFT JOIN AccountTypes at ON l.AccountTypeId = at.AccountTypeId
     LEFT JOIN LeadContacts lc ON lc.LeadId = l.LeadId
     WHERE l.CompanyName LIKE ?
+       OR l.CompanyName LIKE ?
+       OR REPLACE(l.CompanyName, ' ', '') LIKE ?
+       OR lc.ContactName LIKE ?
        OR lc.ContactName LIKE ?
        OR u.UserName LIKE ?
     ORDER BY l.LeadDate DESC
-    LIMIT 10
+    LIMIT 20
     `,
-    [searchTerm, searchTerm, searchTerm]
+    [searchTerm, noSpaces, noSpaces, searchTerm, noSpaces, searchTerm]
   );
 
-  // Group contacts per lead (a lead can have multiple contacts)
+  // Group contacts per lead
   const grouped: Record<number, any> = {};
   for (const row of rows) {
     if (!grouped[row.LeadId]) {
@@ -52,11 +62,15 @@ export async function searchLead(pool: any, query: string) {
       };
     }
     if (row.ContactName || row.ContactEmail) {
-      grouped[row.LeadId].Contacts.push({
-        ContactName: row.ContactName,
-        ContactEmail: row.ContactEmail,
-        ContactPhone: row.ContactPhone,
-      });
+      // Avoid duplicate contacts
+      const existing = grouped[row.LeadId].Contacts;
+      if (!existing.some((c: any) => c.ContactName === row.ContactName && c.ContactEmail === row.ContactEmail)) {
+        existing.push({
+          ContactName: row.ContactName,
+          ContactEmail: row.ContactEmail,
+          ContactPhone: row.ContactPhone,
+        });
+      }
     }
   }
 
@@ -69,7 +83,7 @@ export async function searchLead(pool: any, query: string) {
     message:
       leads.length === 0
         ? `No leads found matching "${query}".`
-        : `Found ${leads.length} lead(s) matching "${query}".`,
+        : `Found ${leads.length} result(s) matching "${query}".`,
   };
 }
 
