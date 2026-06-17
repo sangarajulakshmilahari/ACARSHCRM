@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
         l.LeadDate,
         l.CreatedOn,
         l.LeadNotes,
-        COALESCE(las.StatusName, ls.StatusName) AS StatusName,
+        las.StatusName AS StatusName,
         latestActivity.ActivityId AS LatestActivityId,
         latestActivity.Notes AS LatestActivityNotes,
         lc.ContactName,
@@ -36,8 +36,6 @@ export async function GET(req: NextRequest) {
         at.AccountTypeId,
         at.Name AS AccountTypeName
       FROM Leads l
-      LEFT JOIN LeadStatuses ls
-        ON l.StatusId = ls.StatusId
       LEFT JOIN LeadContacts lc
         ON lc.LeadId = l.LeadId
       LEFT JOIN ContactRoles cr
@@ -90,6 +88,8 @@ export async function GET(req: NextRequest) {
           LatestActivityId: row.LatestActivityId,
           LatestActivityNotes: row.LatestActivityNotes,
           OwnerName: row.OwnerName,
+          AccountTypeId: row.AccountTypeId ?? 10,
+          AccountTypeName: row.AccountTypeName ?? "Lead",
           Contacts: [],
         };
       }
@@ -144,26 +144,19 @@ export async function POST(req: Request) {
     conn = await pool.getConnection();
     await conn.beginTransaction();
  
-    /* 1 Get StatusId */
-    const [statusRows]: any = await conn.query(
-      `SELECT StatusId FROM LeadStatuses WHERE StatusName = ?`,
-      [StatusName]
-    );
-    const StatusId = statusRows[0]?.StatusId ?? 1;
- 
-    /* 2 Get OwnerId */
+    /* 1 Get OwnerId */
     const [ownerRows]: any = await conn.query(
       `SELECT UserId FROM Users WHERE UserName = ?`,
       [OwnerName]
     );
     const OwnerId = ownerRows[0]?.UserId ?? null;
- 
-    /* 3 Insert Lead */
+
+    /* 2 Insert Lead */
     const [leadInsert]: any = await conn.query(
       `
       INSERT INTO Leads
-        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, StatusId, OwnerId)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, OwnerId)
+      VALUES (?, ?, ?, ?, ?, ?)
       `,
       [
         CompanyName,
@@ -171,14 +164,13 @@ export async function POST(req: Request) {
         LeadSource,
         LeadDate,
         Notes,
-        StatusId,
         OwnerId,
       ]
     );
  
     const LeadId = leadInsert.insertId;
  
-    /* 4 Insert Contact (STRICT) */
+    /* 3 Insert Contact (STRICT) */
     if (ContactName || ContactEmail || ContactPhone) {
       if (!ContactRoleName) {
         await conn.rollback();
@@ -220,7 +212,7 @@ export async function POST(req: Request) {
       );
     }
  
-    /* 5 Optional Reminder */
+    /* 4 Optional Reminder */
     if (AddReminder) {
       await conn.query(
         `

@@ -28,15 +28,24 @@ export async function GET(
   l.LeadSource,
   DATE_FORMAT(l.LeadDate, '%Y-%m-%d') AS LeadDate,
   l.LeadNotes,
-  ls.StatusName,
+  latestStatus.StatusName,
   l.AccountTypeId,
   at.Name AS AccountTypeName,     -- ✅ ADD THIS
   u.UserName AS OwnerName
 FROM Leads l
-LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
 LEFT JOIN Users u ON l.OwnerId = u.UserId
 LEFT JOIN AccountTypes at        -- ✅ ADD THIS
   ON l.AccountTypeId = at.AccountTypeId
+LEFT JOIN (
+  SELECT la1.LeadId, ls1.StatusName
+  FROM LeadActivities la1
+  LEFT JOIN LeadStatuses ls1 ON la1.StatusId = ls1.StatusId
+  INNER JOIN (
+    SELECT LeadId, MAX(ActivityDate) AS MaxActivityDate
+    FROM LeadActivities
+    GROUP BY LeadId
+  ) la2 ON la1.LeadId = la2.LeadId AND la1.ActivityDate = la2.MaxActivityDate
+) latestStatus ON latestStatus.LeadId = l.LeadId
 WHERE l.LeadId = ?
 
         `,
@@ -188,7 +197,6 @@ export async function PUT(
     LeadSource,
     LeadDate,
     OwnerName,
-    StatusName,
     LeadNotes,
     Contacts,
   } = body;
@@ -198,16 +206,6 @@ export async function PUT(
 
   try {
     await conn.beginTransaction();
-
-    /* StatusId */
-    let statusId = null;
-    if (StatusName) {
-      const [rows]: any = await conn.query(
-        `SELECT StatusId FROM LeadStatuses WHERE StatusName = ?`,
-        [StatusName]
-      );
-      if (rows.length) statusId = rows[0].StatusId;
-    }
 
     /* OwnerId */
     let ownerId = null;
@@ -228,7 +226,6 @@ export async function PUT(
         LeadSource = ?,
         LeadDate = ?,
         LeadNotes = ?,
-        StatusId = ?,
         OwnerId = ?
       WHERE LeadId = ?
       `,
@@ -238,15 +235,24 @@ export async function PUT(
         LeadSource || null,
         LeadDate || null,
         LeadNotes || null,
-        statusId,
         ownerId,
         leadId,
       ]
     );
 
-    /* Contacts */
+    /* Contacts: update existing, insert new, delete removed (without breaking FK) */
     if (Array.isArray(Contacts)) {
-      await conn.query(`DELETE FROM LeadContacts WHERE LeadId = ?`, [leadId]);
+      const [existingRows]: any = await conn.query(
+        `SELECT LeadContactID FROM LeadContacts WHERE LeadId = ?`,
+        [leadId]
+      );
+
+      const existingIds = new Set<number>(
+        existingRows
+          .map((r: any) => Number(r.LeadContactID))
+          .filter((id: number) => !Number.isNaN(id))
+      );
+      const incomingExistingIds = new Set<number>();
 
       for (const c of Contacts) {
         let roleId = null;
@@ -266,11 +272,51 @@ export async function PUT(
           if (rows.length) roleId = rows[0].RoleId;
         }
 
+        const maybeContactId = Number(c?.LeadContactID ?? c?.ContactId ?? NaN);
+        const isExistingContact =
+          !Number.isNaN(maybeContactId) && existingIds.has(maybeContactId);
+
+        if (isExistingContact) {
+          incomingExistingIds.add(maybeContactId);
+
+          await conn.query(
+            `
+            UPDATE LeadContacts
+            SET
+              ContactName = ?,
+              ContactEmail = ?,
+              ContactTitle = ?,
+              ContactPhone = ?,
+              ContactRoleId = ?,
+              LinkedInProfile = ?,
+              LinkedInRequestSent = ?,
+              LinkedInRequestAccepted = ?,
+              EmailSent = ?
+            WHERE LeadId = ? AND LeadContactID = ?
+            `,
+            [
+              c.ContactName || null,
+              c.ContactEmail || null,
+              c.ContactTitle || null,
+              c.ContactPhone || null,
+              roleId,
+              c.LinkedInProfile || null,
+              c.LinkedInRequestSent ? 1 : 0,
+              c.LinkedInRequestAccepted ? 1 : 0,
+              c.EmailSent ? 1 : 0,
+              leadId,
+              maybeContactId,
+            ]
+          );
+
+          continue;
+        }
+
         await conn.query(
           `
           INSERT INTO LeadContacts
-          (LeadId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactRoleId,
-           LinkedInProfile, LinkedInRequestSent, LinkedInRequestAccepted, EmailSent)
+            (LeadId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactRoleId,
+             LinkedInProfile, LinkedInRequestSent, LinkedInRequestAccepted, EmailSent)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
@@ -285,6 +331,28 @@ export async function PUT(
             c.LinkedInRequestAccepted ? 1 : 0,
             c.EmailSent ? 1 : 0,
           ]
+        );
+      }
+
+      const deletedContactIds = [...existingIds].filter(
+        (id) => !incomingExistingIds.has(id)
+      );
+
+      if (deletedContactIds.length) {
+        const placeholders = deletedContactIds.map(() => "?").join(", ");
+
+        await conn.query(
+          `
+          UPDATE LeadActivities
+          SET ContactId = NULL
+          WHERE LeadId = ? AND ContactId IN (${placeholders})
+          `,
+          [leadId, ...deletedContactIds]
+        );
+
+        await conn.query(
+          `DELETE FROM LeadContacts WHERE LeadId = ? AND LeadContactID IN (${placeholders})`,
+          [leadId, ...deletedContactIds]
         );
       }
     }

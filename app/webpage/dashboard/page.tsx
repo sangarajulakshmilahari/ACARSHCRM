@@ -11,7 +11,14 @@ type OutreachAnalytics = {
   engagementEfficiency: number;
 };
 
+type FunnelMetrics = {
+  leads: number;
+  prospects: number;
+  accounts: number;
+};
+
 export default function DashboardPage() {
+  const chartPalette = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#0ea5e9"];
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState<number>(0);
   const [statusCounts, setStatusCounts] = useState<Record<number, number>>({});
@@ -34,6 +41,11 @@ export default function DashboardPage() {
     acceptanceRate: 0,
     engagementEfficiency: 0,
   });
+  const [funnel, setFunnel] = useState<FunnelMetrics>({
+    leads: 0,
+    prospects: 0,
+    accounts: 0,
+  });
   const [isDarkTheme, setIsDarkTheme] = useState(false);
 
   const outreachDonutRef = useRef<HTMLCanvasElement>(null);
@@ -51,6 +63,11 @@ export default function DashboardPage() {
       .then((res) => res.json())
       .then((data) => {
         setTotalLeads(Number(data.totalLeads ?? 0));
+        setFunnel({
+          leads: Number(data?.funnel?.leads ?? data.totalLeads ?? 0),
+          prospects: Number(data?.funnel?.prospects ?? 0),
+          accounts: Number(data?.funnel?.accounts ?? 0),
+        });
 
         const map: Record<number, number> = {};
         (data.statusCounts || []).forEach((s: any) => {
@@ -128,16 +145,77 @@ export default function DashboardPage() {
           );
           return record ? record.count : 0;
         }),
-        backgroundColor: ["#007bff", "#28a745", "#ffc107", "#dc3545", "#17a2b8"][
-          index % 5
-        ],
+        backgroundColor: chartPalette[index % chartPalette.length],
+        borderRadius: 8,
+        borderSkipped: false,
       })),
-    [owners, monthlyTrends, rollingMonths]
+    [owners, monthlyTrends, rollingMonths, chartPalette]
   );
 
   const sent = outreachAnalytics.totalLinkedInRequestsSent;
   const accepted = outreachAnalytics.totalLinkedInRequestsAccepted;
   const pending = Math.max(sent - accepted, 0);
+  const chartTextColor = isDarkTheme ? "#cbd5e1" : "#667085";
+  const chartGridColor = isDarkTheme
+    ? "rgba(148,163,184,0.18)"
+    : "rgba(148,163,184,0.12)";
+
+  const funnelStages = useMemo(() => {
+    const leads = Math.max(Number(funnel.leads || totalLeads || 0), 0);
+    const prospects = Math.min(Math.max(Number(funnel.prospects || 0), 0), leads);
+    const accounts = Math.min(Math.max(Number(funnel.accounts || 0), 0), prospects);
+
+    const leadToProspect = leads > 0 ? (prospects / leads) * 100 : 0;
+    const prospectToAccount = prospects > 0 ? (accounts / prospects) * 100 : 0;
+
+    const leadWidth = 100;
+    const prospectWidth = leads > 0 ? Math.max(60, Math.min(92, leadToProspect)) : 74;
+    const accountWidth = leads > 0
+      ? Math.max(40, Math.min(prospectWidth - 10, (accounts / Math.max(leads, 1)) * 100))
+      : 52;
+
+    return [
+      {
+        key: "leads",
+        label: "Leads",
+        count: leads,
+        width: leadWidth,
+        icon: "fa-layer-group",
+        color: "#6366f1",
+        conversion: null as number | null,
+      },
+      {
+        key: "prospects",
+        label: "Prospects",
+        count: prospects,
+        width: prospectWidth,
+        icon: "fa-user-check",
+        color: "#14b8a6",
+        conversion: leadToProspect,
+      },
+      {
+        key: "accounts",
+        label: "Customers",
+        count: accounts,
+        width: accountWidth,
+        icon: "fa-building",
+        color: "#f59e0b",
+        conversion: prospectToAccount,
+      },
+    ];
+  }, [funnel, totalLeads]);
+
+  const funnelInsights = useMemo(() => {
+    const leads = funnelStages[0]?.count ?? 0;
+    const prospects = funnelStages[1]?.count ?? 0;
+    const accounts = funnelStages[2]?.count ?? 0;
+
+    return {
+      leadToProspectDropOff: Math.max(leads - prospects, 0),
+      prospectToAccountDropOff: Math.max(prospects - accounts, 0),
+      overallConversion: leads > 0 ? ((accounts / leads) * 100).toFixed(1) : "0.0",
+    };
+  }, [funnelStages]);
 
   useEffect(() => {
     if (!outreachDonutRef.current) return;
@@ -150,10 +228,10 @@ export default function DashboardPage() {
         datasets: [
           {
             data: [accepted, pending],
-            backgroundColor: ["#34d399", "#60a5fa"],
+            backgroundColor: ["#14b8a6", "#94a3b8"],
             borderColor: isDarkTheme ? "#0f172a" : "#ffffff",
-            borderWidth: 3,
-            hoverOffset: 7,
+            borderWidth: 4,
+            hoverOffset: 6,
           },
         ],
       },
@@ -165,9 +243,11 @@ export default function DashboardPage() {
           legend: {
             position: "bottom",
             labels: {
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
               usePointStyle: true,
               boxWidth: 8,
+              padding: 14,
+              font: { size: 12, weight: 600 },
             },
           },
         },
@@ -195,7 +275,7 @@ export default function DashboardPage() {
               outreachAnalytics.totalLinkedInRequestsAccepted,
               outreachAnalytics.totalEmailsSent,
             ],
-            backgroundColor: ["#3b82f6", "#10b981", "#f97316"],
+            backgroundColor: ["#6366f1", "#14b8a6", "#f59e0b"],
             borderRadius: 8,
             borderSkipped: false,
           },
@@ -212,17 +292,13 @@ export default function DashboardPage() {
             beginAtZero: true,
             ticks: {
               precision: 0,
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
-            grid: {
-              color: isDarkTheme
-                ? "rgba(148,163,184,0.22)"
-                : "rgba(148,163,184,0.16)",
-            },
+            grid: { color: chartGridColor },
           },
           x: {
             ticks: {
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
             grid: { display: false },
           },
@@ -246,10 +322,12 @@ export default function DashboardPage() {
         datasets: [
           {
             data: leadsByOwner.map((o) => o.count),
-            backgroundColor: ["#007bff", "#28a745", "#ffc107", "#dc3545", "#17a2b8"],
-            borderColor: ["#0056b3", "#1e7e34", "#e0a800", "#bd2130", "#138496"],
-            borderWidth: 3,
-            borderRadius: 2,
+            backgroundColor: leadsByOwner.map(
+              (_owner, i) => chartPalette[i % chartPalette.length]
+            ),
+            borderWidth: 0,
+            borderRadius: 8,
+            borderSkipped: false,
           },
         ],
       },
@@ -263,23 +341,15 @@ export default function DashboardPage() {
             ticks: {
               stepSize: 5,
               precision: 0,
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
-            grid: {
-              color: isDarkTheme
-                ? "rgba(148,163,184,0.22)"
-                : "rgba(148,163,184,0.16)",
-            },
+            grid: { color: chartGridColor },
           },
           x: {
             ticks: {
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
-            grid: {
-              color: isDarkTheme
-                ? "rgba(148,163,184,0.22)"
-                : "rgba(148,163,184,0.16)",
-            },
+            grid: { color: chartGridColor },
           },
         },
       },
@@ -304,6 +374,15 @@ export default function DashboardPage() {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              color: chartTextColor,
+              usePointStyle: true,
+              boxWidth: 8,
+              font: { size: 12, weight: 600 },
+            },
+          },
           tooltip: {
             callbacks: {
               title: (items) => items[0].label,
@@ -317,23 +396,15 @@ export default function DashboardPage() {
             ticks: {
               stepSize: 5,
               precision: 0,
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
-            grid: {
-              color: isDarkTheme
-                ? "rgba(148,163,184,0.22)"
-                : "rgba(148,163,184,0.16)",
-            },
+            grid: { color: chartGridColor },
           },
           x: {
             ticks: {
-              color: isDarkTheme ? "#cbd5e1" : "#64748b",
+              color: chartTextColor,
             },
-            grid: {
-              color: isDarkTheme
-                ? "rgba(148,163,184,0.22)"
-                : "rgba(148,163,184,0.16)",
-            },
+            grid: { color: chartGridColor },
           },
         },
       },
@@ -399,6 +470,78 @@ export default function DashboardPage() {
           })}
         </div>
 
+        <div className="funnel-trends-row">
+          <div className="chart-card funnel-card">
+            <div className="chart-header" style={{ textAlign: "left" }}>
+              <h3>Sales Funnel</h3>
+              <p className="chart-subtitle" style={{ marginTop: 4, marginBottom: 0 }}>
+                Lead → Prospect → Customer conversion pipeline
+              </p>
+            </div>
+
+            <div className="funnel-kpi-strip">
+              <div className="funnel-kpi-pill">
+                <span>Lead → Prospect Drop-off</span>
+                <strong>{funnelInsights.leadToProspectDropOff}</strong>
+              </div>
+              <div className="funnel-kpi-pill">
+                <span>Prospect → Customer Drop-off</span>
+                <strong>{funnelInsights.prospectToAccountDropOff}</strong>
+              </div>
+              <div className="funnel-kpi-pill accent">
+                <span>Overall Conversion</span>
+                <strong>{funnelInsights.overallConversion}%</strong>
+              </div>
+            </div>
+
+            <div className="funnel-shell">
+              {funnelStages.map((stage, idx) => (
+                <React.Fragment key={stage.key}>
+                  <div
+                    className="funnel-stage"
+                    style={{
+                      width: `${stage.width}%`,
+                      borderColor: `${stage.color}55`,
+                      background: `linear-gradient(135deg, ${stage.color}EE 0%, ${stage.color}B8 100%)`,
+                    }}
+                    title={`${stage.label}: ${stage.count}`}
+                  >
+                    <div className="funnel-stage-gloss" />
+                    <div className="funnel-stage-inner">
+                      <div className="funnel-left">
+                        <div className="funnel-icon" style={{ background: "rgba(255,255,255,0.22)", color: "#fff" }}>
+                          <i className={`fas ${stage.icon}`}></i>
+                        </div>
+                        <div className="funnel-meta">
+                          <strong>{stage.label}</strong>
+                          <span>{stage.conversion === null ? "Entry stage" : `${stage.conversion.toFixed(1)}% from previous`}</span>
+                        </div>
+                      </div>
+                      <div className="funnel-count">{stage.count}</div>
+                    </div>
+                  </div>
+
+                  {idx < funnelStages.length - 1 && (
+                    <div className="funnel-conversion">
+                      <i className="fas fa-arrow-down"></i>
+                      <span>{(funnelStages[idx + 1].conversion ?? 0).toFixed(1)}% conversion</span>
+                    </div>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          <div className="chart-card monthly-half">
+            <div className="chart-header">
+              <h3>Monthly Trends by Owner</h3>
+            </div>
+            <div className="chart-container">
+              <canvas ref={monthlyRef} />
+            </div>
+          </div>
+        </div>
+
         <div className="charts-row">
           <div className="chart-card outreach-experiment">
             {/* <div className="chart-header">
@@ -421,10 +564,10 @@ export default function DashboardPage() {
                 <span>Emails</span>
                 <strong>{outreachAnalytics.totalEmailsSent}</strong>
               </div>
-              <div className="kpi kpi-eff">
+              {/* <div className="kpi kpi-eff">
                 <span>LinkedIn Acceptance Rate</span>
                 <strong>{outreachAnalytics.engagementEfficiency}%</strong>
-              </div>
+              </div> */}
             </div>
 
             <div className="conversion-progress">
@@ -466,20 +609,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="chart-card full">
-          <div className="chart-header">
-            <h3>Monthly Trends by Owner</h3>
-          </div>
-          <div className="chart-container">
-            <canvas ref={monthlyRef} />
-          </div>
-        </div>
       </div>
 
       <style jsx>{`
         .dashboard-container {
-          padding: 22px;
-          background: #f6f8fc;
+          padding: 24px;
+          background: #f5f7fb;
           min-height: 100vh;
         }
         .dashboard-header {
@@ -487,32 +622,42 @@ export default function DashboardPage() {
           justify-content: space-between;
           align-items: center;
           background: #fff;
-          padding: 4px 16px;
-          border-radius: 12px;
-          border: 1px solid #e7edf6;
-          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+          padding: 10px 18px;
+          border-radius: 14px;
+          border: 1px solid #e6ebf4;
+          box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
         }
         .total-count {
-          background: #007bff;
-          color: #fff;
-          padding: 12px 20px;
-          border-radius: 25px;
-          font-weight: 500;
+          background: #eef2ff;
+          color: #4338ca;
+          padding: 10px 16px;
+          border-radius: 999px;
+          border: 1px solid #e0e7ff;
+          font-weight: 600;
+          font-size: 13px;
         }
         .status-cards-grid {
           display: grid;
           grid-template-columns: repeat(7, 1fr);
-          gap: 10px;
-          margin: 20px 0;
+          gap: 12px;
+          
+          margin: 20px 0 22px;
         }
         .status-card {
           background: #fff;
-          padding: 12px;
-          border-radius: 10px;
-          border: 1px solid #e8eef8;
-          box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+          min-height: 120px;
+          padding: 14px 12px;
+          border-radius: 12px;
+          border: 1px solid #e7ecf5;
+          box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
           text-align: center;
           position: relative;
+          overflow: hidden;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .status-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
         }
         .status-card::before {
           content: "";
@@ -520,7 +665,8 @@ export default function DashboardPage() {
           top: 0;
           left: 0;
           right: 0;
-          height: 2px;
+          height: 5px;
+          border-radius: 14px 14px 0 0;
         }
         .new::before {
           background: #28a745;
@@ -546,19 +692,24 @@ export default function DashboardPage() {
 
         .status-icon {
           font-size: 18px;
-          margin-bottom: 5px;
+          margin-bottom: 8px;
         }
         .status-content h4 {
           margin: 0;
-          font-size: 20px;
+          font-size: 26px;
+          font-weight: 700;
+          line-height: 1.08;
         }
         .status-content p {
-          margin: 0;
-          font-size: 11px;
+          margin: 3px 0 2px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #475569;
         }
         .percentage {
-          font-size: 9px;
-          color: #777;
+          font-size: 11px;
+          color: #64748b;
+          font-weight: 500;
         }
 
         .charts-row {
@@ -566,25 +717,174 @@ export default function DashboardPage() {
           grid-template-columns: 1fr 1fr;
           gap: 20px;
         }
+        .funnel-trends-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 20px;
+          margin-bottom: 20px;
+          align-items: stretch;
+        }
+        .funnel-card {
+          margin-bottom: 0;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        }
+        .monthly-half .chart-container {
+          height: 420px;
+        }
+        .funnel-kpi-strip {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+        .funnel-kpi-pill {
+          border: 1px solid #e3e8f3;
+          border-radius: 14px;
+          padding: 10px 12px;
+          background: #fff;
+          box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+        }
+        .funnel-kpi-pill span {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: #64748b;
+          margin-bottom: 2px;
+        }
+        .funnel-kpi-pill strong {
+          font-size: 18px;
+          color: #0f172a;
+          line-height: 1;
+        }
+        .funnel-kpi-pill.accent {
+          background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+          border-color: #e0e7ff;
+        }
+        .funnel-shell {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 10px;
+          padding-top: 6px;
+        }
+        .funnel-stage {
+          border: 1px solid;
+          border-radius: 16px;
+          box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+          transition: transform 0.22s ease, box-shadow 0.22s ease;
+          position: relative;
+          overflow: hidden;
+        }
+        .funnel-stage-gloss {
+          position: absolute;
+          inset: 0 auto auto 0;
+          width: 100%;
+          height: 48%;
+          background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.32) 0%,
+            rgba(255, 255, 255, 0.02) 100%
+          );
+        }
+        .funnel-stage:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 16px 30px rgba(15, 23, 42, 0.18);
+        }
+        .funnel-stage-inner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 12px 14px;
+        }
+        .funnel-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+        }
+        .funnel-icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          flex-shrink: 0;
+        }
+        .funnel-meta {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+        .funnel-meta strong {
+          color: #ffffff;
+          font-size: 14px;
+          line-height: 1.1;
+        }
+        .funnel-meta span {
+          color: rgba(255, 255, 255, 0.92);
+          font-size: 12px;
+          margin-top: 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .funnel-count {
+          font-size: 24px;
+          font-weight: 700;
+          color: #fff;
+          line-height: 1;
+          padding-left: 10px;
+          flex-shrink: 0;
+        }
+        .funnel-conversion {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #7c3aed;
+          font-weight: 600;
+          background: rgba(99, 102, 241, 0.09);
+          border: 1px solid rgba(99, 102, 241, 0.24);
+          border-radius: 999px;
+          padding: 5px 11px;
+        }
         .chart-card {
           background: #fff;
           padding: 20px;
-          border-radius: 12px;
-          border: 1px solid #e7edf6;
-          box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+          border-radius: 14px;
+          border: 1px solid #e6ebf4;
+          box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+          transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+        .chart-card:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
         }
         .chart-card.full {
           margin-top: 20px;
         }
         .chart-header {
-          text-align: center;
-          border-bottom: 2px solid #f1f3f4;
+          text-align: left;
+          border-bottom: 1px solid #edf2f7;
           margin-bottom: 16px;
-          padding-bottom: 2px;
+          padding-bottom: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .chart-header h3 {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 600;
+          letter-spacing: 0.1px;
+          color: #0f172a;
         }
         .chart-subtitle {
-          margin-top: -6px;
-          margin-bottom: 10px;
+          margin-top: 0;
+          margin-bottom: 0;
           font-size: 12px;
           color: #64748b;
           font-weight: 500;
@@ -598,44 +898,49 @@ export default function DashboardPage() {
         }
         .outreach-kpis {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 10px;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
           margin-bottom: 12px;
         }
         .kpi {
-          border: 1px solid #e5ebf4;
-          border-radius: 10px;
-          padding: 11px;
+          border: 1px solid #e8edf6;
+          border-radius: 12px;
+          padding: 12px;
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .kpi:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
         }
         .kpi span {
           display: block;
-          font-size: 11px;
+          font-size: 12px;
           color: #64748b;
           margin-bottom: 4px;
           font-weight: 600;
         }
         .kpi strong {
-          font-size: 21px;
+          font-size: 24px;
           color: #0f172a;
           line-height: 1;
         }
         .kpi-sent {
-          background: rgba(59, 130, 246, 0.08);
+          background: rgba(99, 102, 241, 0.1);
         }
         .kpi-accepted {
-          background: rgba(16, 185, 129, 0.1);
+          background: rgba(20, 184, 166, 0.12);
         }
         .kpi-emails {
-          background: rgba(249, 115, 22, 0.1);
+          background: rgba(245, 158, 11, 0.16);
         }
         .kpi-eff {
           background: rgba(168, 85, 247, 0.1);
         }
         .conversion-progress {
-          border: 1px solid #e2e8f0;
-          border-radius: 10px;
-          padding: 10px;
+          border: 1px solid #e7ecf5;
+          border-radius: 12px;
+          padding: 12px;
           margin-bottom: 12px;
           background: #fff;
         }
@@ -648,7 +953,7 @@ export default function DashboardPage() {
           color: #334155;
         }
         .conversion-head strong {
-          color: #2563eb;
+          color: #4f46e5;
           font-size: 14px;
         }
         .track {
@@ -659,7 +964,7 @@ export default function DashboardPage() {
         }
         .fill {
           height: 100%;
-          background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
+          background: linear-gradient(90deg, #6366f1 0%, #14b8a6 60%, #f59e0b 100%);
           border-radius: 999px;
           transition: width 0.3s ease;
         }
@@ -669,8 +974,8 @@ export default function DashboardPage() {
           gap: 12px;
         }
         .mini-chart {
-          border: 1px solid #e2e8f0;
-          border-radius: 10px;
+          border: 1px solid #e6ebf4;
+          border-radius: 12px;
           padding: 10px;
           background: #fff;
         }
@@ -687,11 +992,30 @@ export default function DashboardPage() {
           .status-cards-grid {
             grid-template-columns: repeat(4, 1fr);
           }
-          .outreach-kpis {
-            grid-template-columns: repeat(2, 1fr);
+          .monthly-half .chart-container {
+            height: 360px;
           }
         }
         @media (max-width: 768px) {
+          .dashboard-container {
+            padding: 16px;
+          }
+          .dashboard-header {
+            padding: 10px 12px;
+          }
+          .dashboard-header p {
+            font-size: 18px !important;
+          }
+          .total-count {
+            padding: 8px 12px;
+            font-size: 12px;
+          }
+          .funnel-kpi-strip {
+            grid-template-columns: 1fr;
+          }
+          .funnel-trends-row {
+            grid-template-columns: 1fr;
+          }
           .charts-row {
             grid-template-columns: 1fr;
           }
@@ -700,6 +1024,15 @@ export default function DashboardPage() {
           }
           .outreach-grid {
             grid-template-columns: 1fr;
+          }
+          .outreach-kpis {
+            grid-template-columns: 1fr;
+          }
+          .funnel-stage {
+            width: 100% !important;
+          }
+          .funnel-count {
+            font-size: 20px;
           }
         }
 
@@ -713,7 +1046,7 @@ export default function DashboardPage() {
           color: #ffc107;
         }
         .qualified .status-icon {
-          color: #007bff;
+          color: #6366f1;
         }
         .unqualified .status-icon {
           color: #6c757d;
@@ -741,6 +1074,30 @@ export default function DashboardPage() {
           }
           .chart-header {
             border-bottom-color: #1e293b;
+          }
+          .funnel-stage {
+            box-shadow: 0 10px 24px rgba(2, 6, 23, 0.4);
+          }
+          .funnel-kpi-pill {
+            background: #0f172a;
+            border-color: #1e293b;
+            box-shadow: 0 8px 20px rgba(2, 6, 23, 0.35);
+          }
+          .funnel-kpi-pill.accent {
+            background: linear-gradient(135deg, #312e81 0%, #134e4a 60%, #78350f 100%);
+            border-color: #334155;
+          }
+          .funnel-kpi-pill span,
+          .funnel-kpi-pill strong {
+            color: #e2e8f0;
+          }
+          .funnel-meta strong,
+          .funnel-count {
+            color: #e2e8f0;
+          }
+          .funnel-meta span,
+          .funnel-conversion {
+            color: #94a3b8;
           }
           .chart-subtitle,
           .kpi span,

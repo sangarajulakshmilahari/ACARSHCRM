@@ -71,7 +71,21 @@ export async function executeTool(
             SUM(CASE WHEN ls.StatusName = 'Lost' THEN 1 ELSE 0 END) as lostCount,
             SUM(CASE WHEN ls.StatusName = 'Converted' THEN 1 ELSE 0 END) as convertedCount
           FROM leads l
-          LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
+          LEFT JOIN (
+            SELECT LeadId, StatusId
+            FROM (
+              SELECT
+                la.LeadId,
+                la.StatusId,
+                ROW_NUMBER() OVER (
+                  PARTITION BY la.LeadId
+                  ORDER BY la.ActivityDate DESC, la.CreatedOn DESC, la.ActivityId DESC
+                ) AS rn
+              FROM LeadActivities la
+            ) ranked
+            WHERE rn = 1
+          ) latestActivity ON latestActivity.LeadId = l.LeadId
+          LEFT JOIN LeadStatuses ls ON latestActivity.StatusId = ls.StatusId
           LEFT JOIN Users u ON l.OwnerId = u.UserId
           LEFT JOIN AccountTypes at ON l.AccountTypeId = at.AccountTypeId
           WHERE 1=1

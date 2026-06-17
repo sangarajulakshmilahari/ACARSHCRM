@@ -20,7 +20,20 @@ export async function GET(req: NextRequest) {
       ${isAdmin ? "" : "WHERE OwnerId = ?"}
     `, scopedParams);
 
-    //  Latest Activity per Lead
+    //  1b Funnel counts
+    const [funnelRows]: any = await pool.query(
+      `
+      SELECT
+        SUM(CASE WHEN l.AccountTypeId = 10 THEN 1 ELSE 0 END) AS leads,
+        SUM(CASE WHEN l.AccountTypeId = 20 THEN 1 ELSE 0 END) AS prospects,
+        SUM(CASE WHEN l.AccountTypeId = 30 THEN 1 ELSE 0 END) AS accounts
+      FROM Leads l
+      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      `,
+      scopedParams
+    );
+
+    //  Latest Activity per Lead + fallback "New" status id for leads with no activity
     const latestActivityCTE = `
       WITH LatestActivity AS (
         SELECT
@@ -31,6 +44,13 @@ export async function GET(req: NextRequest) {
             ORDER BY la.ActivityDate DESC, la.CreatedOn DESC
           ) AS rn
         FROM LeadActivities la
+      ),
+      NewStatus AS (
+        SELECT StatusId
+        FROM LeadStatuses
+        WHERE StatusName = 'New'
+        ORDER BY StatusId
+        LIMIT 1
       )
     `;
 
@@ -38,14 +58,15 @@ export async function GET(req: NextRequest) {
     const [statusCounts]: any = await pool.query(`
       ${latestActivityCTE}
       SELECT
-        COALESCE(la.StatusId, l.StatusId) AS StatusId,
+        COALESCE(la.StatusId, ns.StatusId) AS StatusId,
         COUNT(l.LeadId) AS count
       FROM Leads l
+      CROSS JOIN NewStatus ns
       LEFT JOIN LatestActivity la
         ON la.LeadId = l.LeadId
         AND la.rn = 1
       ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
-      GROUP BY COALESCE(la.StatusId, l.StatusId)
+      GROUP BY COALESCE(la.StatusId, ns.StatusId)
       ORDER BY StatusId
     `, scopedParams);
 
@@ -57,11 +78,12 @@ export async function GET(req: NextRequest) {
         COUNT(l.LeadId) AS count,
         ls.SortOrder
       FROM Leads l
+      CROSS JOIN NewStatus ns
       LEFT JOIN LatestActivity la
         ON la.LeadId = l.LeadId
         AND la.rn = 1
       LEFT JOIN LeadStatuses ls
-        ON ls.StatusId = COALESCE(la.StatusId, l.StatusId)
+        ON ls.StatusId = COALESCE(la.StatusId, ns.StatusId)
       ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
       GROUP BY ls.StatusName, ls.SortOrder
       ORDER BY ls.SortOrder
@@ -153,6 +175,11 @@ export async function GET(req: NextRequest) {
     //  RESPONSE
     return NextResponse.json({
       totalLeads: totalRows[0]?.totalLeads ?? 0,
+      funnel: {
+        leads: Number(funnelRows?.[0]?.leads ?? 0),
+        prospects: Number(funnelRows?.[0]?.prospects ?? 0),
+        accounts: Number(funnelRows?.[0]?.accounts ?? 0),
+      },
       statusCounts,
       leadsByStatus,
       leadsByOwner,

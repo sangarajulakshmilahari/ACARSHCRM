@@ -2,11 +2,12 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { formatLocaleDate } from "@/app/utils/dateTime";
 import {
   convertLeadDirectToAccountWithExistingFlow,
   convertLeadWithExistingFlow,
 } from "../convert-actions";
-
+import { Search, Wrench, Star, Package, AlertTriangle } from "lucide-react";
 type Contact = {
   LeadContactID?: number;
   ContactName?: string;
@@ -55,6 +56,23 @@ type Opportunity = {
   OpportunityContact?: string;
 };
 
+type Project = {
+  ProjectId: number;
+  ProjectCode?: string | null;
+  ProjectName: string;
+  ProjectDesc?: string | null;
+  TechStack?: string | null;
+  KeyWork?: string | null;
+  ValueAdded?: string | null;
+  Deliverables?: string | null;
+  Challenges?: string | null;
+  CompanyName: string;
+  LeadId: number;
+  StartDate?: string;
+  EndDate?: string;
+  Status?: string;
+};
+
 type Lead = {
   LeadId?: number | string;
   CompanyName?: string;
@@ -68,6 +86,7 @@ type Lead = {
   Activities?: Activity[];
   Reminders?: Reminder[];
   Opportunities?: Opportunity[];
+  Projects?: Project[];
   AccountTypeId?: number;
   AccountTypeName?: string;
 };
@@ -137,6 +156,31 @@ export default function LeadDetailsClient({
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [contactSearch, setContactSearch] = useState("");
   const [selectedContactIdx, setSelectedContactIdx] = useState<number | null>(null);
+  const [activityContactIdx, setActivityContactIdx] = useState<number | null>(null);
+  const [isActivityContactLocked, setIsActivityContactLocked] = useState(false);
+  const [activityContactSearch, setActivityContactSearch] = useState("");
+  const [showActivityContactDropdown, setShowActivityContactDropdown] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
+  const [projectSortBy, setProjectSortBy] = useState<"name" | "company">("name");
+  const [projectStatusFilter, setProjectStatusFilter] = useState<"all" | "active" | "hidden">("active");
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [projectFormMode, setProjectFormMode] = useState<"add" | "edit">("add");
+  const [projectActionLoading, setProjectActionLoading] = useState<number | null>(null);
+  const [projectForm, setProjectForm] = useState({
+    ProjectId: null as number | null,
+    ProjectName: "",
+    ProjectDesc: "",
+    TechStack: "",
+    KeyWork: "",
+    ValueAdded: "",
+    Deliverables: "",
+    Challenges: "",
+    StartDate: "",
+    EndDate: "",
+  });
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [showProjectSummary, setShowProjectSummary] = useState(false);
+  const [projectSummaryLoading, setProjectSummaryLoading] = useState(false);
 
 
 
@@ -229,15 +273,58 @@ export default function LeadDetailsClient({
   const [editingCell, setEditingCell] = useState<string | null>(null);
 
   const [activityForm, setActivityForm] = useState({
-    ActivityDate: "",
+    ActivityDate: new Date().toISOString().split("T")[0],
     Mode: "",
     Notes: "",
     Status: "",
   });
+  const leadContacts = lead?.Contacts ?? [];
   const selectedActivityContact =
-    selectedContactIdx !== null
-      ? (lead?.Contacts ?? [])[selectedContactIdx] ?? null
+    activityContactIdx !== null
+      ? leadContacts[activityContactIdx] ?? null
       : null;
+  const filteredActivityContacts = leadContacts
+    .map((contact, originalIndex) => ({ contact, originalIndex }))
+    .filter(({ contact }) =>
+      (contact.ContactName || "")
+        .toLowerCase()
+        .includes(activityContactSearch.trim().toLowerCase())
+    );
+
+  const resetActivityModal = () => {
+    setActivityForm({
+      ActivityDate: new Date().toISOString().split("T")[0],
+      Mode: "",
+      Status: "",
+      Notes: "",
+    });
+    setActivityContactIdx(null);
+    setIsActivityContactLocked(false);
+    setActivityContactSearch("");
+    setShowActivityContactDropdown(false);
+  };
+
+  const closeActivityModal = () => {
+    setShowAddActivity(false);
+    resetActivityModal();
+  };
+
+  const openActivityFromContact = (contactIndex: number) => {
+    setActivityContactIdx(contactIndex);
+    setIsActivityContactLocked(true);
+    setActivityContactSearch("");
+    setShowActivityContactDropdown(false);
+    setShowAddActivity(true);
+  };
+
+  const openActivityFromGlobal = () => {
+    const contacts = lead?.Contacts ?? [];
+    setActivityContactIdx(contacts.length === 1 ? 0 : null);
+    setIsActivityContactLocked(false);
+    setActivityContactSearch("");
+    setShowActivityContactDropdown(false);
+    setShowAddActivity(true);
+  };
 
   const [reminderForm, setReminderForm] = useState({
     ReminderDate: "",
@@ -338,6 +425,15 @@ export default function LeadDetailsClient({
       return;
     }
 
+    if (!selectedActivityContact) {
+      alert(
+        leadContacts.length === 0
+          ? "No contacts available. Please add a contact first."
+          : "Please select a contact"
+      );
+      return;
+    }
+
     const leadId =
       lead?.LeadId ??
       (effectiveLeadId && !isNaN(Number(effectiveLeadId))
@@ -361,7 +457,7 @@ export default function LeadDetailsClient({
           Mode: activityForm.Mode,
           Notes: activityForm.Notes,
           Status: activityForm.Status,
-          ActivityDate: new Date().toISOString(),
+          ActivityDate: activityForm.ActivityDate,
           ContactId: selectedActivityContact?.LeadContactID ?? null,
         }),
       });
@@ -384,14 +480,8 @@ export default function LeadDetailsClient({
           : prev
       );
 
-      setActivityForm({
-        ActivityDate: "",
-        Mode: "",
-        Status: "",
-        Notes: "",
-      });
-
       setShowAddActivity(false);
+      resetActivityModal();
     } catch (err) {
       console.error("Frontend save error:", err);
       alert("Unexpected error while saving activity");
@@ -399,13 +489,187 @@ export default function LeadDetailsClient({
   };
 
   const formatDateTime = (value?: string) => {
-    if (!value) return "—";
+    return formatLocaleDate(value, undefined, "—");
+  };
 
-    const d = new Date(value);
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    return `${day}-${month}-${year}`;
+  const toDisplayValue = (value?: string | null) => {
+    if (value === null || value === undefined) return "Not Available";
+    const trimmed = String(value).trim();
+    return trimmed.length > 0 ? trimmed : "Not Available";
+  };
+
+  const toDisplayPoints = (value?: string | null) => {
+    const displayValue = toDisplayValue(value);
+    if (displayValue === "Not Available") return ["Not Available"];
+
+    return displayValue
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[\-•\d.)\s]+/, "").trim())
+      .filter(Boolean);
+  };
+
+  const formatProjectDate = (value?: string | null) => {
+    if (!value) return "Not Available";
+    return formatLocaleDate(value, undefined, "Not Available");
+  };
+
+  const formatPointsForEditor = (value?: string | null) => {
+    const points = toDisplayPoints(value).filter((p) => p !== "Not Available");
+    return points.map((p) => `• ${p}`).join("\n");
+  };
+
+  const normalizePointsFromEditor = (value?: string | null) => {
+    if (!value) return null;
+    const cleaned = String(value)
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[\-•\d.)\s]+/, "").trim())
+      .filter(Boolean)
+      .join("\n");
+
+    return cleaned.length > 0 ? cleaned : null;
+  };
+
+  const resetProjectForm = () => {
+    setProjectForm({
+      ProjectId: null,
+      ProjectName: "",
+      ProjectDesc: "",
+      TechStack: "",
+      KeyWork: "",
+      ValueAdded: "",
+      Deliverables: "",
+      Challenges: "",
+      StartDate: "",
+      EndDate: "",
+    });
+  };
+
+  const openAddProjectForm = () => {
+    setProjectFormMode("add");
+    resetProjectForm();
+    setShowProjectForm(true);
+  };
+
+  const openEditProjectForm = (project: Project) => {
+    setProjectFormMode("edit");
+    setProjectForm({
+      ProjectId: project.ProjectId,
+      ProjectName: project.ProjectName || "",
+      ProjectDesc: project.ProjectDesc || "",
+      TechStack: project.TechStack || "",
+      KeyWork: formatPointsForEditor(project.KeyWork),
+      ValueAdded: formatPointsForEditor(project.ValueAdded),
+      Deliverables: formatPointsForEditor(project.Deliverables),
+      Challenges: formatPointsForEditor(project.Challenges),
+      StartDate: project.StartDate ? String(project.StartDate).split("T")[0] : "",
+      EndDate: project.EndDate ? String(project.EndDate).split("T")[0] : "",
+    });
+    setShowProjectForm(true);
+  };
+
+  const fetchProjectsForLead = async (status: "all" | "active" | "hidden" = projectStatusFilter) => {
+    if (!effectiveLeadId) return;
+    const res = await fetch(
+      `/api/employees/leads/${Number(effectiveLeadId)}/projects?status=${status}`
+    );
+    if (!res.ok) throw new Error("Failed to refresh projects");
+    const projects = await res.json();
+    setLead((prev) => (prev ? { ...prev, Projects: projects || [] } : prev));
+  };
+
+  const handleSaveProject = async () => {
+    if (!effectiveLeadId) return;
+    if (!projectForm.ProjectName.trim()) {
+      alert("Project Name is required");
+      return;
+    }
+
+    try {
+      setProjectActionLoading(projectForm.ProjectId ?? -1);
+
+      const method = projectFormMode === "add" ? "POST" : "PUT";
+      const res = await fetch(`/api/employees/leads/${Number(effectiveLeadId)}/projects`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(projectFormMode === "edit" ? { ProjectId: projectForm.ProjectId } : {}),
+          ProjectName: projectForm.ProjectName,
+          ProjectDesc: projectForm.ProjectDesc || null,
+          TechStack: projectForm.TechStack || null,
+          KeyWork: normalizePointsFromEditor(projectForm.KeyWork),
+          ValueAdded: normalizePointsFromEditor(projectForm.ValueAdded),
+          Deliverables: normalizePointsFromEditor(projectForm.Deliverables),
+          Challenges: normalizePointsFromEditor(projectForm.Challenges),
+          StartDate: projectForm.StartDate || null,
+          EndDate: projectForm.EndDate || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to save project");
+      }
+
+      await fetchProjectsForLead(projectStatusFilter);
+      setShowProjectForm(false);
+      resetProjectForm();
+    } catch (error: any) {
+      alert(error?.message || "Failed to save project");
+    } finally {
+      setProjectActionLoading(null);
+    }
+  };
+
+  const handleToggleProjectHidden = async (project: Project) => {
+    if (!effectiveLeadId) return;
+    const isHidden = String(project.Status || "").toLowerCase() === "hidden";
+
+    try {
+      setProjectActionLoading(project.ProjectId);
+      const res = await fetch(`/api/employees/leads/${Number(effectiveLeadId)}/projects`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ProjectId: project.ProjectId,
+          IsHidden: !isHidden,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to update project visibility");
+      }
+
+      await fetchProjectsForLead(projectStatusFilter);
+    } catch (error: any) {
+      alert(error?.message || "Failed to update project visibility");
+    } finally {
+      setProjectActionLoading(null);
+    }
+  };
+
+  const handleOpenProjectSummary = async (projectId: number) => {
+    if (!effectiveLeadId || !projectId) return;
+
+    try {
+      setProjectSummaryLoading(true);
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${projectId}`
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to fetch project summary");
+      }
+
+      const project = await res.json();
+      setSelectedProject(project || null);
+      setShowProjectSummary(true);
+    } catch (err) {
+      console.error("Failed to load project details:", err);
+      alert("Failed to load project details");
+    } finally {
+      setProjectSummaryLoading(false);
+    }
   };
 
   // save reminder
@@ -482,7 +746,7 @@ export default function LeadDetailsClient({
           Mode: field === "Mode" ? value : activity.Mode,
           Notes: field === "Notes" ? value : activity.Notes,
           Status: field === "Status" ? value : activity.Status,
-          ActivityDate: activity.ActivityDate,
+          ActivityDate: field === "ActivityDate" ? value : activity.ActivityDate,
         }),
       });
 
@@ -786,7 +1050,7 @@ export default function LeadDetailsClient({
   const getBackLabel = () => {
     if (origin === "leads") return "← Back to Leads";
     if (origin === "Prospect") return "← Back to Prospects";
-    if (origin === "Account") return "← Back to Accounts";
+    if (origin === "Account") return "← Back to Customers";
     return "← Back";
   };
 
@@ -871,6 +1135,21 @@ export default function LeadDetailsClient({
         );
         if (trySingle.ok) {
           const data = await trySingle.json();
+          
+          // Fetch projects for this lead
+          try {
+            const projectsRes = await fetch(
+              `/api/employees/leads/${Number(effectiveLeadId)}/projects?status=${projectStatusFilter}`
+            );
+            if (projectsRes.ok) {
+              const projects = await projectsRes.json();
+              data.Projects = projects || [];
+            }
+          } catch (projectErr) {
+            console.error("Failed to fetch projects:", projectErr);
+            data.Projects = [];
+          }
+          
           if (!cancelled) setLead(data);
           return;
         }
@@ -910,7 +1189,7 @@ export default function LeadDetailsClient({
     return () => {
       cancelled = true;
     };
-  }, [effectiveLeadId, origin]);
+  }, [effectiveLeadId, origin, projectStatusFilter]);
 
   //  EARLY STATES
 
@@ -1352,7 +1631,7 @@ export default function LeadDetailsClient({
                       transition: "all 0.15s ease",
                     }}
                   >
-                    Convert to Account
+                    Convert to Customer
                   </button>
 
 
@@ -1365,14 +1644,14 @@ export default function LeadDetailsClient({
           {/* PROSPECT (AccountTypeId = 20) */}
           {false && isProspect && (
             <button onClick={handleConvert} style={secondaryBtn}>
-              Convert to Account
+              Convert to Customer
             </button>
           )}
 
           {/* ACCOUNT (AccountTypeId = 30) */}
           {false && isAccount && (
             <button onClick={handleConvert} style={secondaryBtn}>
-              Convert to Master Account
+              Convert to Master Customer
             </button>
           )}
 
@@ -1421,7 +1700,7 @@ export default function LeadDetailsClient({
             <span style={contactRowLabel}>Date: </span>
             <span style={value}>
               {lead.LeadDate
-                ? new Date(String(lead.LeadDate)).toLocaleDateString()
+                ? formatLocaleDate(lead.LeadDate, undefined, "—")
                 : "—"}
             </span>
           </div>
@@ -1636,7 +1915,7 @@ export default function LeadDetailsClient({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setShowAddActivity(true);
+                              openActivityFromContact(originalIndex);
                             }}
                             style={{
                               padding: "5px 14px",
@@ -1687,7 +1966,7 @@ export default function LeadDetailsClient({
       {/* Activities */}
       <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
         Activities
-        <button style={addBtn} onClick={() => setShowAddActivity(true)}>
+        <button style={addBtn} onClick={openActivityFromGlobal}>
           +
         </button>
       </div>
@@ -1712,8 +1991,28 @@ export default function LeadDetailsClient({
           <tbody>
             {(lead.Activities || []).map((a, i) => (
               <tr key={a.ActivityId}>
-                {/* Activity Date (read-only) */}
-                <td style={tdStyle}>{formatDateTime(a.ActivityDate)}</td>
+                {/* Activity Date (editable) */}
+                <td
+                  style={tdStyle}
+                  onClick={() => setEditingCell(`act-date-${a.ActivityId}`)}
+                >
+                  {editingCell === `act-date-${a.ActivityId}` ? (
+                    <input
+                      autoFocus
+                      type="date"
+                      style={inputBox}
+                      defaultValue={a.ActivityDate ? a.ActivityDate.split("T")[0] : ""}
+                      onBlur={(e) => {
+                        if (isValueChanged(a.ActivityDate?.split("T")[0], e.target.value)) {
+                          autoSaveActivityField(i, "ActivityDate", e.target.value);
+                        }
+                        setEditingCell(null);
+                      }}
+                    />
+                  ) : (
+                    formatDateTime(a.ActivityDate)
+                  )}
+                </td>
 
                 {/* Mode */}
                 <td
@@ -1970,9 +2269,465 @@ export default function LeadDetailsClient({
           </tbody>
         </table>
       </div>
+
+      {/* Projects Section - Only for Customers (AccountTypeId >= 30) */}
+      {(lead?.AccountTypeId ?? 0) >= 30 && (
+        <>
+          <div
+            style={{
+              ...sectionTitle,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 24,
+              marginBottom: 10,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>Projects</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={projectStatusFilter}
+                onChange={(e) => setProjectStatusFilter(e.target.value as "all" | "active" | "hidden")}
+                style={{
+                  ...inputBox,
+                  width: 140,
+                  height: 34,
+                  fontSize: 13,
+                  padding: "4px 10px",
+                }}
+              >
+                <option value="active">Active</option>
+                <option value="hidden">Hidden</option>
+                <option value="all">All</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={openAddProjectForm}
+                style={{
+                  ...primaryBtn,
+                  padding: "7px 12px",
+                  fontSize: 13,
+                }}
+              >
+                + Add Project
+              </button>
+            </div>
+          </div>
+
+          {/* Project Search */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <span
+                style={{
+                  position: "absolute",
+                  left: "12px",
+                  color: "#94a3b8",
+                  pointerEvents: "none",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                <Search size={14} />
+              </span>
+              <input
+                type="text"
+                placeholder="Search projects by name..."
+                value={projectSearch}
+                onChange={(e) => setProjectSearch(e.target.value)}
+                style={{
+                  ...inputBox,
+                  width: "100%",
+                  maxWidth: 400,
+                  padding: "10px 12px 10px 36px",
+                  fontSize: "14px",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 6,
+                  background: "#f8fafc",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={tableWrap}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "separate",
+                borderSpacing: 0,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, width: 250 }}>Project Name</th>
+                  {/* <th style={{ ...thStyle, width: 200 }}>Company Name</th> */}
+                  <th style={{ ...thStyle, width: 150 }}>Start Date</th>
+                  <th style={{ ...thStyle, width: 150 }}>End Date</th>
+                  <th style={{ ...thStyle, width: 120 }}>Status</th>
+                  <th style={{ ...thStyle, width: 180 }}>Actions</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {(() => {
+                  const filteredProjects = (lead.Projects || [])
+                    .filter((p) =>
+                      (p.ProjectName || "")
+                        .toLowerCase()
+                        .includes(projectSearch.toLowerCase())
+                    )
+                    .sort((a, b) => {
+                      return (a.ProjectName || "").localeCompare(b.ProjectName || "");
+                    });
+
+                  return filteredProjects.length > 0 ? (
+                    filteredProjects.map((p) => (
+                      <tr
+                        key={p.ProjectId}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => handleOpenProjectSummary(p.ProjectId)}
+                      >
+                        <td style={{ ...tdStyle, color: "#1d4ed8", fontWeight: 600 }}>
+                          {p.ProjectName}
+                        </td>
+                        {/* <td style={tdStyle}>{p.CompanyName}</td> */}
+                        <td style={tdStyle}>{p.StartDate || "—"}</td>
+                        <td style={tdStyle}>{p.EndDate || "—"}</td>
+                        <td style={tdStyle}>
+                          <span
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: 12,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              backgroundColor: p.Status?.toLowerCase() === "active" ? "#d1fae5" : "#f3f4f6",
+                              color: p.Status?.toLowerCase() === "active" ? "#065f46" : "#374151",
+                            }}
+                          >
+                            {p.Status || "Active"}
+                          </span>
+                        </td>
+                        <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={() => openEditProjectForm(p)}
+                              style={{
+                                border: "1px solid #93c5fd",
+                                background: "#eff6ff",
+                                color: "#1d4ed8",
+                                borderRadius: 6,
+                                padding: "4px 9px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} style={{ ...tdStyle, textAlign: "center", color: "#999" }}>
+                        {(lead.Projects || []).length === 0 ? "No projects found" : "No matching projects"}
+                      </td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+
+          {projectSummaryLoading && (
+            <div
+              style={{
+                marginTop: 12,
+                color: "#475569",
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+            >
+              Loading project summary...
+            </div>
+          )}
+
+          {showProjectSummary && selectedProject && (
+            <div style={{ ...modalOverlay, zIndex: 10001 }} onClick={() => setShowProjectSummary(false)}>
+              <div
+                style={{
+                  background: "#f8fafc",
+                  width: "min(1200px, 78vw)",
+                  maxHeight: "85vh",
+                  borderRadius: 12,
+                  overflowY: "auto",
+                  border: "1px solid #dbeafe",
+                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    background: "linear-gradient(90deg, #1d4ed8, #2563eb)",
+                    color: "#fff",
+                    padding: "12px 18px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 3,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 19, fontWeight: 700 }}>
+                      {toDisplayValue(selectedProject.ProjectName)}
+                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.95, marginTop: 4 }}>
+                      Customer: {toDisplayValue(lead?.CompanyName)} • Status: {toDisplayValue(selectedProject.Status || "Active")} • Start: {formatProjectDate(selectedProject.StartDate)} • End: {selectedProject.EndDate ? formatProjectDate(selectedProject.EndDate) : "Ongoing"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      onClick={() => setShowProjectSummary(false)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#fff",
+                        fontSize: 24,
+                        cursor: "pointer",
+                        lineHeight: 1,
+                      }}
+                      aria-label="Close project summary"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: 14,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      gridColumn: "1 / -1",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                      Project Description
+                    </div>
+                    <div style={{ marginTop: 6, color: "#0f172a", lineHeight: 1.5 }}>
+                      {toDisplayValue(selectedProject.ProjectDesc)}
+                    </div>
+                  </section>
+
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      gridColumn: "1 / -1",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                      Tech Stack
+                    </div>
+                    <div style={{ marginTop: 6, color: "#0f172a", lineHeight: 1.5 }}>
+                      {toDisplayValue(selectedProject.TechStack)}
+                    </div>
+                  </section>
+
+                  {([
+                    { title: "Key Work", body: toDisplayPoints(selectedProject.KeyWork), Icon: Wrench },
+                    { title: "Value Added", body: toDisplayPoints(selectedProject.ValueAdded), Icon: Star },
+                    { title: "Deliverables", body: toDisplayPoints(selectedProject.Deliverables), Icon: Package },
+                    { title: "Challenges", body: toDisplayPoints(selectedProject.Challenges), Icon: AlertTriangle },
+                  ] as Array<{ title: string; body: string[]; Icon: any }>).map(({ title, body, Icon }) => (
+                    <section
+                      key={title}
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon size={14} />
+                        <span>{title}</span>
+                      </div>
+                      {Array.isArray(body) && (
+                        <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20, color: "#0f172a", lineHeight: 1.6 }}>
+                          {body.map((point, index) => (
+                            <li key={`${title}-${index}`}>{point}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  ))}
+
+                  <section
+                    style={{
+                      gridColumn: "1 / -1",
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    <button
+                      onClick={() => setShowProjectSummary(false)}
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        background: "#fff",
+                        color: "#0f172a",
+                        borderRadius: 6,
+                        padding: "7px 12px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Close
+                    </button>
+                  </section>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showProjectForm && (
+            <div style={{ ...modalOverlay, zIndex: 10002 }} onClick={() => setShowProjectForm(false)}>
+              <div
+                style={{
+                  background: "#fff",
+                  width: "min(760px, 94vw)",
+                  maxHeight: "86vh",
+                  overflowY: "auto",
+                  borderRadius: 10,
+                  border: "1px solid #dbeafe",
+                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ ...modalHeader, position: "sticky", top: 0, zIndex: 2 }}>
+                  {projectFormMode === "add" ? "Add Project" : "Edit Project"}
+                </div>
+
+                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <input
+                    style={{ ...inputBox, width: "100%" }}
+                    placeholder="Project Name*"
+                    value={projectForm.ProjectName}
+                    onChange={(e) => setProjectForm((prev) => ({ ...prev, ProjectName: e.target.value }))}
+                  />
+                  <textarea
+                    style={{ ...inputBox, width: "100%", height: 70, resize: "vertical" }}
+                    placeholder="Project Description"
+                    value={projectForm.ProjectDesc}
+                    onChange={(e) => setProjectForm((prev) => ({ ...prev, ProjectDesc: e.target.value }))}
+                  />
+
+                  <input
+                    style={{ ...inputBox, width: "100%" }}
+                    placeholder="Tech Stack"
+                    value={projectForm.TechStack}
+                    onChange={(e) => setProjectForm((prev) => ({ ...prev, TechStack: e.target.value }))}
+                  />
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <textarea
+                      style={{ ...inputBox, width: "100%", height: 80, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }}
+                      placeholder="Key Work (one line per point)"
+                      value={projectForm.KeyWork}
+                      onChange={(e) => setProjectForm((prev) => ({ ...prev, KeyWork: e.target.value }))}
+                    />
+                    <textarea
+                      style={{ ...inputBox, width: "100%", height: 80, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }}
+                      placeholder="Value Added (one line per point)"
+                      value={projectForm.ValueAdded}
+                      onChange={(e) => setProjectForm((prev) => ({ ...prev, ValueAdded: e.target.value }))}
+                    />
+                    <textarea
+                      style={{ ...inputBox, width: "100%", height: 80, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }}
+                      placeholder="Deliverables (one line per point)"
+                      value={projectForm.Deliverables}
+                      onChange={(e) => setProjectForm((prev) => ({ ...prev, Deliverables: e.target.value }))}
+                    />
+                    <textarea
+                      style={{ ...inputBox, width: "100%", height: 80, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }}
+                      placeholder="Challenges (one line per point)"
+                      value={projectForm.Challenges}
+                      onChange={(e) => setProjectForm((prev) => ({ ...prev, Challenges: e.target.value }))}
+                    />
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <label style={{ ...labelStyle, marginBottom: 4, display: "block" }}>Start Date</label>
+                      <input
+                        type="date"
+                        style={{ ...inputBox, width: "100%" }}
+                        value={projectForm.StartDate}
+                        onChange={(e) => setProjectForm((prev) => ({ ...prev, StartDate: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ ...labelStyle, marginBottom: 4, display: "block" }}>End Date</label>
+                      <input
+                        type="date"
+                        style={{ ...inputBox, width: "100%" }}
+                        value={projectForm.EndDate}
+                        onChange={(e) => setProjectForm((prev) => ({ ...prev, EndDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ ...modalFooter, justifyContent: "flex-end" }}>
+                  <button
+                    style={cancelBtn}
+                    onClick={() => {
+                      setShowProjectForm(false);
+                      resetProjectForm();
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    style={saveBtn}
+                    onClick={handleSaveProject}
+                    disabled={projectActionLoading !== null}
+                  >
+                    {projectActionLoading !== null ? "Saving..." : projectFormMode === "add" ? "Add Project" : "Save Changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* ADD ACTIVITY MODAL */}
       {showAddActivity && (
-        <div style={modalOverlay} onClick={() => setShowAddActivity(false)}>
+        <div style={modalOverlay} onClick={closeActivityModal}>
           <div style={modalBox} onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div
@@ -1986,9 +2741,7 @@ export default function LeadDetailsClient({
               <span>Add Activity</span>
               <span
                 style={{ cursor: "pointer", fontSize: 22 }}
-                onClick={() => {
-                  setShowAddActivity(false);
-                }}
+                onClick={closeActivityModal}
               >
                 ✕
               </span>
@@ -1997,17 +2750,204 @@ export default function LeadDetailsClient({
             {/* Body */}
             <div style={modalBody}>
               <label style={{ fontWeight: 500 }}>Contact</label>
+              {isActivityContactLocked ? (
+                <input
+                  style={{
+                    ...inputBox,
+                    width: 480,
+                    background: "#f1f5f9",
+                    color: "#64748b",
+                    cursor: "not-allowed",
+                  }}
+                  value={selectedActivityContact?.ContactName || "No contact selected"}
+                  readOnly
+                  disabled
+                />
+              ) : (
+                <div style={{ position: "relative", width: 480, maxWidth: "100%" }}>
+                  {showActivityContactDropdown ? (
+                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                      <span
+  style={{
+    position: "absolute",
+    left: "8px",
+    color: "#94a3b8",
+    pointerEvents: "none",
+    display: "flex",
+    alignItems: "center",
+  }}
+>
+  <Search size={14} />
+</span>
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search..."
+                        value={activityContactSearch}
+                        onChange={(e) => setActivityContactSearch(e.target.value)}
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          padding: "6px 8px 6px 32px",
+                          fontSize: "13px",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 4,
+                          background: "#f8fafc",
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={leadContacts.length === 0}
+                      onClick={() => {
+                        if (leadContacts.length > 0) {
+                          setShowActivityContactDropdown(true);
+                        }
+                      }}
+                      style={{
+                        ...inputBox,
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        textAlign: "left",
+                        background: leadContacts.length === 0 ? "#f1f5f9" : "#fff",
+                        color: selectedActivityContact ? "#0f172a" : "#64748b",
+                        cursor: leadContacts.length === 0 ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {"Search contact"}
+                      </span>
+                      <span style={{ color: "#64748b", paddingLeft: 10 }}>v</span>
+                    </button>
+                  )}
+
+                  {showActivityContactDropdown && leadContacts.length > 0 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: "calc(100% + 4px)",
+                        zIndex: 10000,
+                        background: "#fff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 6,
+                        boxShadow: "0 12px 24px rgba(15, 23, 42, 0.16)",
+                        padding: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        maxHeight: "240px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          maxHeight: "200px",
+                          overflowY: "auto",
+                          padding: "0px 4px",
+                          flex: 1,
+                        }}
+                      >
+                        {filteredActivityContacts.map(({ contact, originalIndex }) => {
+                          const isSelected = activityContactIdx === originalIndex;
+
+                          return (
+                            <button
+                              key={contact.LeadContactID ?? originalIndex}
+                              type="button"
+                              onClick={() => {
+                                setActivityContactIdx(originalIndex);
+                                setActivityContactSearch("");
+                                setShowActivityContactDropdown(false);
+                              }}
+                              style={{
+                                width: "100%",
+                                border: "none",
+                                borderRadius: 4,
+                                padding: "6px 8px",
+                                marginBottom: 0,
+                                marginTop: "2px",
+                                textAlign: "left",
+                                background: isSelected ? "#dbeafe" : "transparent",
+                                color: "#0f172a",
+                                cursor: "pointer",
+                                transition: "background-color 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) {
+                                  e.currentTarget.style.backgroundColor = "#f1f5f9";
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) {
+                                  e.currentTarget.style.backgroundColor = "transparent";
+                                }
+                              }}
+                            >
+                              <div style={{ fontWeight: 500, fontSize: "13px", lineHeight: "1.3" }}>
+                                {contact.ContactName || "Unnamed contact"}
+                              </div>
+                              {(contact.ContactTitle || contact.ContactEmail) && (
+                                <div
+                                  style={{
+                                    color: "#64748b",
+                                    fontSize: "12px",
+                                    lineHeight: "1.2",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    marginTop: "2px",
+                                  }}
+                                >
+                                  {[contact.ContactTitle, contact.ContactEmail]
+                                    .filter(Boolean)
+                                    .join(" • ")}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        {filteredActivityContacts.length === 0 && (
+                          <div
+                            style={{
+                              color: "#94a3b8",
+                              fontSize: "12px",
+                              padding: "12px 8px",
+                              textAlign: "center",
+                            }}
+                          >
+                            No matching contacts.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {leadContacts.length === 0 && (
+                    <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
+                      No contacts available. Please add a contact first.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label style={{ fontWeight: 500 }}>Activity Date*</label>
               <input
-                style={{
-                  ...inputBox,
-                  width: 480,
-                  background: "#f1f5f9",
-                  color: "#64748b",
-                  cursor: "not-allowed",
-                }}
-                value={selectedActivityContact?.ContactName || "No contact selected"}
-                readOnly
-                disabled
+                type="date"
+                style={{ ...inputBox, width: 480 }}
+                value={activityForm.ActivityDate}
+                onChange={(e) =>
+                  setActivityForm({ ...activityForm, ActivityDate: e.target.value })
+                }
               />
 
               <label style={{ fontWeight: 500 }}>Activity Type*</label>
@@ -2061,15 +3001,7 @@ export default function LeadDetailsClient({
             <div style={{ ...modalFooter, paddingLeft: 300 }}>
               <button
                 style={cancelBtn}
-                onClick={() => {
-                  setShowAddActivity(false);
-                  setActivityForm({
-                    ActivityDate: "",
-                    Mode: "",
-                    Status: "",
-                    Notes: "",
-                  });
-                }}
+                onClick={closeActivityModal}
               >
                 Cancel
               </button>

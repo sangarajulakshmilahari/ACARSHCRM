@@ -53,7 +53,6 @@ export default function EditLeadClient({
   const [loading, setLoading] = useState<boolean>(!!effectiveLeadId);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [leadStatuses, setLeadStatuses] = useState<any[]>([]);
 
   // initial empty state (will be populated by fetch if leadId exists)
   const emptyLead: Lead = {
@@ -79,27 +78,15 @@ export default function EditLeadClient({
 
   const [lead, setLead] = useState<Lead>(emptyLead);
   const [originalLead, setOriginalLead] = useState<Lead | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch("/api/masters/others")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled || !Array.isArray(data?.leadStatuses)) return;
-
-        setLeadStatuses(data.leadStatuses);
-        setLead((prev) => ({
-          ...prev,
-          StatusName: prev.StatusName || data.leadStatuses[0]?.StatusName || "",
-        }));
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [contactSearch, setContactSearch] = useState<string>("");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedContactIndex, setSelectedContactIndex] = useState<number>(0);
+  const [expandedSections, setExpandedSections] = useState<{
+    basic: boolean;
+    outreach: boolean;
+    role: boolean;
+  }>({ basic: true, outreach: true, role: true });
 
   // Fetch lead details when effectiveLeadId changes
   useEffect(() => {
@@ -202,10 +189,10 @@ export default function EditLeadClient({
   };
 
   const addContact = () => {
-    setLead((prev) => ({
-      ...prev,
-      Contacts: [
-        ...(Array.isArray(prev.Contacts) ? prev.Contacts : []),
+    setLead((prev) => {
+      const existing = Array.isArray(prev.Contacts) ? prev.Contacts : [];
+      const nextContacts = [
+        ...existing,
         {
           ContactName: "",
           ContactEmail: "",
@@ -213,17 +200,80 @@ export default function EditLeadClient({
           ContactRoleName: "Decision Maker",
           ContactPhone: "",
         },
-      ],
-    }));
+      ];
+      setSelectedContactIndex(nextContacts.length - 1);
+      return {
+        ...prev,
+        Contacts: nextContacts,
+      };
+    });
   };
 
   const removeContact = (index: number) => {
     setLead((prev) => {
       const contacts = Array.isArray(prev.Contacts) ? [...prev.Contacts] : [];
       contacts.splice(index, 1);
+      if (contacts.length === 0) {
+        setSelectedContactIndex(-1);
+      } else if (selectedContactIndex >= contacts.length) {
+        setSelectedContactIndex(contacts.length - 1);
+      }
       return { ...prev, Contacts: contacts };
     });
   };
+
+  const contacts = Array.isArray(lead.Contacts) ? lead.Contacts : [];
+
+  const filteredContactIndices = useMemo(() => {
+    return contacts
+      .map((c, idx) => ({ c, idx }))
+      .filter(({ c }) => {
+        const haystack = [
+          c?.ContactName,
+          c?.ContactEmail,
+          c?.ContactPhone,
+          c?.ContactTitle,
+          c?.ContactRoleName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        const matchesSearch =
+          !contactSearch || haystack.includes(contactSearch.toLowerCase());
+        const matchesRole =
+          roleFilter === "all" ||
+          (c?.ContactRoleName ?? "Decision Maker") === roleFilter;
+
+        const statusValue = c?.EmailSent
+          ? "email"
+          : c?.LinkedInRequestAccepted
+          ? "linkedinAccepted"
+          : c?.LinkedInRequestSent
+          ? "linkedinSent"
+          : "notStarted";
+        const matchesStatus = statusFilter === "all" || statusValue === statusFilter;
+
+        return matchesSearch && matchesRole && matchesStatus;
+      })
+      .map(({ idx }) => idx);
+  }, [contacts, contactSearch, roleFilter, statusFilter]);
+
+  const selectedContact: Contact | null =
+    selectedContactIndex >= 0 && selectedContactIndex < contacts.length
+      ? contacts[selectedContactIndex]
+      : null;
+
+  useEffect(() => {
+    if (contacts.length === 0) {
+      setSelectedContactIndex(-1);
+      return;
+    }
+
+    if (selectedContactIndex < 0 || selectedContactIndex >= contacts.length) {
+      setSelectedContactIndex(0);
+    }
+  }, [contacts.length, selectedContactIndex]);
 
   // isDirty for save button (simple deep compare)
   const isDirty = useMemo(() => {
@@ -325,9 +375,30 @@ export default function EditLeadClient({
     appearance: "none",
   };
 
+  const actionDockVisible = isDirty || saving;
+
+  const sectionToggleButton: React.CSSProperties = {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontWeight: 700,
+    color: "#0f172a",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: 0,
+  };
+
   // ----------- render form populated from `lead` -----------
   return (
-    <div style={{ padding: 28, maxWidth: 1100, margin: "auto" }}>
+    <div
+      style={{
+        padding: 28,
+        maxWidth: 1100,
+        margin: "auto",
+        paddingBottom: 28,
+      }}
+    >
       <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -439,22 +510,12 @@ export default function EditLeadClient({
 
           <div style={{ flex: 1 }}>
             <label style={labelStyle}>Status</label>
-            <select
-              style={selectCommon}
+            <input
+              style={{ ...inputCommon, background: "#f8fafc", color: "#475569" }}
               value={lead.StatusName ?? ""}
-              onChange={(e) => updateField("StatusName", e.target.value)}
-            >
-              <option value="">Select status</option>
-              {leadStatuses.map((status) => (
-                <option
-                  key={status.StatusId}
-                  value={status.StatusName}
-                  title={status.StatusDesc}
-                >
-                  {status.StatusName}
-                </option>
-              ))}
-            </select>
+              readOnly
+              placeholder="Latest activity status"
+            />
           </div>
         </div>
       </section>
@@ -465,185 +526,383 @@ export default function EditLeadClient({
           style={{
             fontSize: 18,
             fontWeight: 700,
-            marginBottom: 25,
+            marginBottom: 14,
             borderBottom: "1px solid #e6e6e6",
             paddingBottom: 10,
           }}
         >
-          Contact Information
+          Contact Workspace ({contacts.length})
         </h3>
 
-        <div style={{ padding: 18 }}>
-          {(lead.Contacts || []).map((c, i) => (
-            <div
-              key={i}
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e7edf6",
-                borderRadius: 10,
-                padding: 16,
-                marginBottom: 16,
-                position: "relative",
-                boxShadow: "0 6px 14px rgba(15, 23, 42, 0.04)",
-              }}
-            >
-              {(lead.Contacts || []).length > 0 && (
-                <button
-                  onClick={() => removeContact(i)}
+        <div
+          style={{
+            background: "#fff",
+            padding: 12,
+            border: "1px solid #e7edf6",
+            borderRadius: 10,
+            marginBottom: 14,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <input
+            style={{ ...inputCommon, flex: "1 1 240px", margin: 0 }}
+            placeholder="Search contacts by name, email, title, phone"
+            value={contactSearch}
+            onChange={(e) => setContactSearch(e.target.value)}
+            aria-label="Search contacts"
+          />
+
+          <select
+            style={{ ...selectCommon, flex: "0 0 170px" }}
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            aria-label="Filter contacts by role"
+          >
+            <option value="all">All roles</option>
+            <option value="Decision Maker">Decision Maker</option>
+            <option value="Influencer">Influencer</option>
+            <option value="Technical">Technical</option>
+            <option value="Finance">Finance</option>
+          </select>
+
+          <select
+            style={{ ...selectCommon, flex: "0 0 190px" }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter contacts by outreach status"
+          >
+            <option value="all">All outreach status</option>
+            <option value="notStarted">Not started</option>
+            <option value="linkedinSent">LinkedIn request sent</option>
+            <option value="linkedinAccepted">LinkedIn accepted</option>
+            <option value="email">Email sent</option>
+          </select>
+
+          <button
+            onClick={addContact}
+            style={{
+              padding: "10px 14px",
+              background: "#2563eb",
+              border: "none",
+              color: "#fff",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontWeight: 700,
+              boxShadow: "0 6px 14px rgba(37, 99, 235, 0.24)",
+            }}
+          >
+            + Add Contact
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(260px, 34%) minmax(0, 66%)",
+            gap: 14,
+          }}
+        >
+          <aside
+            style={{
+              border: "1px solid #e7edf6",
+              borderRadius: 10,
+              maxHeight: 540,
+              overflowY: "auto",
+              background: "#fcfdff",
+            }}
+            aria-label="Contact list"
+          >
+            {filteredContactIndices.length === 0 ? (
+              <div style={{ padding: 16, color: "#64748b", fontSize: 14 }}>
+                No contacts match your search/filter.
+              </div>
+            ) : (
+              filteredContactIndices.map((contactIndex) => {
+                const c = contacts[contactIndex];
+                const isSelected = contactIndex === selectedContactIndex;
+                const title = c?.ContactTitle || "No title";
+                const name = c?.ContactName || `Contact ${contactIndex + 1}`;
+                return (
+                  <button
+                    key={contactIndex}
+                    onClick={() => setSelectedContactIndex(contactIndex)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      border: "none",
+                      cursor: "pointer",
+                      borderBottom: "1px solid #edf2fb",
+                      background: isSelected ? "#eaf1ff" : "transparent",
+                      padding: "12px 14px",
+                    }}
+                    aria-current={isSelected ? "true" : undefined}
+                  >
+                    <div style={{ fontWeight: 700, color: "#0f172a" }}>{name}</div>
+                    <div style={{ fontSize: 13, color: "#475569", marginTop: 3 }}>
+                      {title}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
+                      {c?.ContactEmail || "No email"}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </aside>
+
+          <div
+            style={{
+              border: "1px solid #e7edf6",
+              borderRadius: 10,
+              padding: 16,
+              background: "#fff",
+              minHeight: 300,
+            }}
+          >
+            {!selectedContact ? (
+              <div style={{ color: "#64748b", fontSize: 14 }}>
+                Select a contact from the list to edit details.
+              </div>
+            ) : (
+              <>
+                <div
                   style={{
-                    position: "absolute",
-                    right: 14,
-                    top: 14,
-                    background: "#ff1f6b",
-                    color: "#fff",
-                    border: "none",
-                    padding: "6px 12px",
-                    borderRadius: 18,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 700,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 12,
+                    gap: 10,
+                    flexWrap: "wrap",
                   }}
-                  aria-label={`Remove contact ${i + 1}`}
                 >
-                  Remove
-                </button>
-              )}
-
-              <div style={{ marginBottom: 8 }}>
-                <strong style={{ fontSize: 14 }}>Contact {i + 1}</strong>
-              </div>
-
-              <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ ...labelStyle, fontWeight: 600 }}>Name</label>
-                  <input
-                    style={inputCommon}
-                    value={c?.ContactName ?? ""}
-                    onChange={(e) =>
-                      updateContact(i, "ContactName", e.target.value)
-                    }
-                    placeholder="Full name"
-                  />
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>
+                      {selectedContact.ContactName ||
+                        `Contact ${selectedContactIndex + 1}`}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: 13 }}>
+                      Quick edit panel
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeContact(selectedContactIndex)}
+                    style={{
+                      background: "#ff1f6b",
+                      color: "#fff",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: 18,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                    aria-label={`Remove contact ${selectedContactIndex + 1}`}
+                  >
+                    Remove
+                  </button>
                 </div>
 
-                <div style={{ flex: 1 }}>
-                  <label style={{ ...labelStyle, fontWeight: 600 }}>
-                    Title
-                  </label>
-                  <input
-                    style={inputCommon}
-                    value={c?.ContactTitle ?? ""}
-                    onChange={(e) =>
-                      updateContact(i, "ContactTitle", e.target.value)
+                <div style={{ marginBottom: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSections((prev) => ({ ...prev, basic: !prev.basic }))
                     }
-                    placeholder="Job title"
-                  />
-                </div>
-              </div>
+                    style={sectionToggleButton}
+                  >
+                    <span>{expandedSections.basic ? "▾" : "▸"}</span> Basic Info
+                  </button>
+                  {expandedSections.basic && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <label style={{ ...labelStyle, fontWeight: 600 }}>Name</label>
+                          <input
+                            style={inputCommon}
+                            value={selectedContact.ContactName ?? ""}
+                            onChange={(e) =>
+                              updateContact(
+                                selectedContactIndex,
+                                "ContactName",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Full name"
+                          />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <label style={{ ...labelStyle, fontWeight: 600 }}>Title</label>
+                          <input
+                            style={inputCommon}
+                            value={selectedContact.ContactTitle ?? ""}
+                            onChange={(e) =>
+                              updateContact(
+                                selectedContactIndex,
+                                "ContactTitle",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Job title"
+                          />
+                        </div>
+                      </div>
 
-              <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ ...labelStyle, fontWeight: 600 }}>
-                    Email
-                  </label>
-                  <input
-                    style={inputCommon}
-                    value={c?.ContactEmail ?? ""}
-                    onChange={(e) =>
-                      updateContact(i, "ContactEmail", e.target.value)
+                      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <label style={{ ...labelStyle, fontWeight: 600 }}>Email</label>
+                          <input
+                            style={inputCommon}
+                            value={selectedContact.ContactEmail ?? ""}
+                            onChange={(e) =>
+                              updateContact(
+                                selectedContactIndex,
+                                "ContactEmail",
+                                e.target.value
+                              )
+                            }
+                            placeholder="email@example.com"
+                          />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <label style={{ ...labelStyle, fontWeight: 600 }}>Phone</label>
+                          <input
+                            style={inputCommon}
+                            value={selectedContact.ContactPhone ?? ""}
+                            onChange={(e) =>
+                              updateContact(
+                                selectedContactIndex,
+                                "ContactPhone",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Enter phone number"
+                          />
+                        </div>
+                      </div>
+
+                      <label style={{ ...labelStyle, fontWeight: 600 }}>LinkedIn URL</label>
+                      <input
+                        style={inputCommon}
+                        value={selectedContact.LinkedInProfile ?? ""}
+                        onChange={(e) =>
+                          updateContact(
+                            selectedContactIndex,
+                            "LinkedInProfile",
+                            e.target.value
+                          )
+                        }
+                        placeholder="https://linkedin.com/in/..."
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSections((prev) => ({
+                        ...prev,
+                        outreach: !prev.outreach,
+                      }))
                     }
-                    placeholder="email@example.com"
-                  />
+                    style={sectionToggleButton}
+                  >
+                    <span>{expandedSections.outreach ? "▾" : "▸"}</span> Outreach
+                    Status
+                  </button>
+                  {expandedSections.outreach && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 24,
+                        marginTop: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedContact.LinkedInRequestSent}
+                          onChange={(e) =>
+                            updateContact(
+                              selectedContactIndex,
+                              "LinkedInRequestSent",
+                              e.target.checked
+                            )
+                          }
+                        />
+                        <span>LinkedIn Request Sent</span>
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedContact.LinkedInRequestAccepted}
+                          onChange={(e) =>
+                            updateContact(
+                              selectedContactIndex,
+                              "LinkedInRequestAccepted",
+                              e.target.checked
+                            )
+                          }
+                        />
+                        <span>LinkedIn Request Accepted</span>
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedContact.EmailSent}
+                          onChange={(e) =>
+                            updateContact(
+                              selectedContactIndex,
+                              "EmailSent",
+                              e.target.checked
+                            )
+                          }
+                        />
+                        <span>Email Sent</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ flex: 1 }}>
-                  <label style={{ ...labelStyle, fontWeight: 600 }}>
-                    Phone
-                  </label>
-                  <input
-                    style={inputCommon}
-                    value={c?.ContactPhone ?? ""}
-                    onChange={(e) =>
-                      updateContact(i, "ContactPhone", e.target.value)
+                <div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSections((prev) => ({ ...prev, role: !prev.role }))
                     }
-                    placeholder="Enter phone number"
-                  />
+                    style={sectionToggleButton}
+                  >
+                    <span>{expandedSections.role ? "▾" : "▸"}</span> Contact Role
+                  </button>
+                  {expandedSections.role && (
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ ...labelStyle, fontWeight: 600 }}>Role</label>
+                      <select
+                        style={{ ...selectCommon, padding: "12px 14px", maxWidth: 260 }}
+                        value={selectedContact.ContactRoleName ?? "Decision Maker"}
+                        onChange={(e) =>
+                          updateContact(
+                            selectedContactIndex,
+                            "ContactRoleName",
+                            e.target.value
+                          )
+                        }
+                      >
+                        <option>Decision Maker</option>
+                        <option>Influencer</option>
+                        <option>Technical</option>
+                        <option>Finance</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <label style={{ ...labelStyle, fontWeight: 600 }}>LinkedIn URL</label>
-                <input
-                  style={inputCommon}
-                  value={c?.LinkedInProfile ?? ""}
-                  onChange={(e) =>
-                    updateContact(i, "LinkedInProfile", e.target.value)
-                  }
-                  placeholder="https://linkedin.com/in/..."
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!c?.LinkedInRequestSent}
-                    onChange={(e) => updateContact(i, "LinkedInRequestSent", e.target.checked)}
-                  />
-                  <span>LinkedIn Request Sent</span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!c?.LinkedInRequestAccepted}
-                    onChange={(e) => updateContact(i, "LinkedInRequestAccepted", e.target.checked)}
-                  />
-                  <span>LinkedIn Request Accepted</span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!c?.EmailSent}
-                    onChange={(e) => updateContact(i, "EmailSent", e.target.checked)}
-                  />
-                  <span>Email Sent</span>
-                </label>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <label style={{ ...labelStyle, fontWeight: 600 }}>Role</label>
-                <select
-                  style={{ ...selectCommon, padding: "12px 14px" }}
-                  value={c?.ContactRoleName ?? "Decision Maker"}
-                  onChange={(e) =>
-                    updateContact(i, "ContactRoleName", e.target.value)
-                  }
-                >
-                  <option>Decision Maker</option>
-                  <option>Influencer</option>
-                  <option>Technical</option>
-                  <option>Finance</option>
-                </select>
-              </div>
-            </div>
-          ))}
-
-          <div style={{ marginTop: 6 }}>
-            <button
-              onClick={addContact}
-              style={{
-                padding: "8px 12px",
-                background: "#2563eb",
-                border: "none",
-                color: "#fff",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontWeight: 600,
-                boxShadow: "0 6px 14px rgba(37, 99, 235, 0.24)",
-              }}
-            >
-              + Add Another Contact
-            </button>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -725,73 +984,124 @@ export default function EditLeadClient({
         style={{ height: 1, background: "#ececec", margin: "8px 0 18px 0" }}
       />
 
-      {/* Action buttons */}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-        <button
-          onClick={() => (onBack ? onBack() : router.back())}
+      {/* Inline status when there are no pending changes */}
+      {!actionDockVisible && (
+        <div
+          role="status"
+          aria-live="polite"
           style={{
-            padding: "10px 18px",
-            borderRadius: 8,
-            border: "none",
-            background: "#e2e8f0",
-            color: "#334155",
-            fontWeight: 600,
-            cursor: "pointer",
-            minWidth: 98,
+            display: "flex",
+            justifyContent: "flex-end",
+            color: "#64748b",
+            fontSize: 13,
+            paddingBottom: 8,
           }}
         >
-          Cancel
-        </button>
+          All changes saved
+        </div>
+      )}
 
-        <button
-          disabled={!isDirty || saving}
-          onClick={saveChanges}
+      {/* Footer action bar: inline, non-sticky, attached to form flow */}
+      <div aria-live="polite" style={{ marginTop: 10 }}>
+        <div
           style={{
-            padding: "10px 18px",
-            borderRadius: 8,
-            border: "none",
-            background: "#2459d3",
-            color: "#fff",
-            fontWeight: 700,
-            cursor: isDirty && !saving ? "pointer" : "not-allowed",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            boxShadow: "0 8px 18px rgba(36, 89, 211, 0.24)",
-            minWidth: 140,
-            opacity: isDirty && !saving ? 1 : 0.5,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            background: "#ffffff",
+            border: "1px solid #d8e1ef",
+            borderRadius: 12,
+            padding: 12,
+            boxShadow: "0 4px 12px rgba(15, 23, 42, 0.04)",
           }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden
+          <div
+            style={{
+              fontSize: 13,
+              color: "#475569",
+              display: "flex",
+              alignItems: "center",
+              fontWeight: 600,
+              minHeight: 40,
+            }}
           >
-            <path
-              d="M17 3H5C4 3 3 4 3 5v14c0 1 1 2 2 2h14c1 0 2-1 2-2V7l-6-4z"
-              fill="#fff"
-              opacity="0.15"
-            ></path>
-            <path
-              d="M17 3H5C4 3 3 4 3 5v14c0 1 1 2 2 2h14c1 0 2-1 2-2V7l-6-4z"
-              stroke="#fff"
-              strokeWidth="1.2"
-            ></path>
-            <rect
-              x="7"
-              y="9"
-              width="10"
-              height="6"
-              rx="1"
-              stroke="#fff"
-              strokeWidth="1.2"
-            ></rect>
-            <circle cx="12" cy="12" r="0.8" fill="#fff"></circle>
-          </svg>
-          {saving ? "Saving…" : "Save Changes"}
-        </button>
+            {saving
+              ? "Saving changes…"
+              : isDirty
+              ? "Unsaved changes"
+              : "All changes saved"}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={() => (onBack ? onBack() : router.back())}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 8,
+                border: "1px solid #d7deea",
+                background: "#f1f5f9",
+                color: "#334155",
+                fontWeight: 600,
+                cursor: "pointer",
+                minWidth: 120,
+              }}
+            >
+              Cancel
+            </button>
+
+            <button
+              disabled={!isDirty || saving}
+              onClick={saveChanges}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 8,
+                border: "none",
+                background: "#2459d3",
+                color: "#fff",
+                fontWeight: 700,
+                cursor: isDirty && !saving ? "pointer" : "not-allowed",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                boxShadow: "0 6px 14px rgba(36, 89, 211, 0.22)",
+                minWidth: 170,
+                opacity: isDirty && !saving ? 1 : 0.65,
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <path
+                  d="M17 3H5C4 3 3 4 3 5v14c0 1 1 2 2 2h14c1 0 2-1 2-2V7l-6-4z"
+                  fill="#fff"
+                  opacity="0.15"
+                ></path>
+                <path
+                  d="M17 3H5C4 3 3 4 3 5v14c0 1 1 2 2 2h14c1 0 2-1 2-2V7l-6-4z"
+                  stroke="#fff"
+                  strokeWidth="1.2"
+                ></path>
+                <rect
+                  x="7"
+                  y="9"
+                  width="10"
+                  height="6"
+                  rx="1"
+                  stroke="#fff"
+                  strokeWidth="1.2"
+                ></rect>
+                <circle cx="12" cy="12" r="0.8" fill="#fff"></circle>
+              </svg>
+              {saving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

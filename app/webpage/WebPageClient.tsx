@@ -19,6 +19,7 @@ import DashboardPage from "./dashboard/page";
 import AddLeadClient from "./leads/addleed/AddLeadClient";
 import LeadDetailsClient from "./leads/Leaddetails/LeadDetailsClient";
 import EditLeadClient from "./leads/Editlead/EditLeadClient";
+import ReportsClient from "./reports/ReportsClient";
 
 import CRMChatBot from "../webpage/components/crmchatbot";
 
@@ -32,7 +33,7 @@ type TabKey =
     | "Prospect"
     | "leadDetails"
     | "Account"
-    | "Reminder"
+    | "reports"
     | "editLead";
 
 type SidebarIconProps = {
@@ -55,6 +56,28 @@ function SidebarIcon({ children }: SidebarIconProps): JSX.Element {
             {children}
         </svg>
     );
+}
+
+async function fetchEmployeeList(endpoint: string): Promise<Employee[]> {
+    const res = await fetch(endpoint);
+    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+    return res.json();
+}
+
+function mergeEmployeeLists(...lists: Employee[][]): Employee[] {
+    const merged = new Map<number | string, Employee>();
+
+    lists.flat().forEach((employee) => {
+        if (employee?.LeadId == null) return;
+        merged.set(employee.LeadId, employee);
+    });
+
+    return Array.from(merged.values());
+}
+
+function getTabLabel(tab: TabKey): string {
+    if (tab === "Account") return "Customer";
+    return tab[0].toUpperCase() + tab.slice(1);
 }
 
 export default function WebPageClient(): JSX.Element {
@@ -104,10 +127,11 @@ export default function WebPageClient(): JSX.Element {
                 "leads",
                 "Prospect",
                 "Account",
+                "reports",
                 "Reminder",
             ].includes(tab)
         ) {
-            handleTab(tab as TabKey);
+            handleTab(tab === "Reminder" ? "reports" : (tab as TabKey));
         }
     }, [searchParams]);
 
@@ -147,10 +171,12 @@ export default function WebPageClient(): JSX.Element {
                 <path d="M10 21v-4h4v4" />
             </SidebarIcon>
         ),
-        Reminder: (
+        reports: (
             <SidebarIcon>
-                <path d="M6 9a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8" />
-                <path d="M10 21a2 2 0 0 0 4 0" />
+                <path d="M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+                <path d="M9 8h6" />
+                <path d="M9 12h6" />
+                <path d="M9 16h4" />
             </SidebarIcon>
         ),
         addLead: "",
@@ -167,10 +193,12 @@ export default function WebPageClient(): JSX.Element {
             setError(null);
             setLoading(true);
 
-            const res = await fetch("/api/employees/leads");
-            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
-            const data: Employee[] = await res.json();
+            const [leads, prospects, accounts] = await Promise.all([
+                fetchEmployeeList("/api/employees/leads"),
+                fetchEmployeeList("/api/employees/prospects"),
+                fetchEmployeeList("/api/employees/account"),
+            ]);
+            const data = mergeEmployeeLists(leads, prospects, accounts);
             // dispatch(setEmployees(data));
             setEmployeesLocal(data);
         } catch (err: any) {
@@ -187,10 +215,11 @@ export default function WebPageClient(): JSX.Element {
             setError(null);
             setLoading(true);
 
-            const res = await fetch("/api/employees/prospects");
-            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
-            const data: Employee[] = await res.json();
+            const [prospects, accounts] = await Promise.all([
+                fetchEmployeeList("/api/employees/prospects"),
+                fetchEmployeeList("/api/employees/account"),
+            ]);
+            const data = mergeEmployeeLists(prospects, accounts);
             // dispatch(setEmployees(data));
             setEmployeesLocal(data);
         } catch (err: any) {
@@ -207,10 +236,7 @@ export default function WebPageClient(): JSX.Element {
             setError(null);
             setLoading(true);
 
-            const res = await fetch("/api/employees/account");
-            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
-            const data: Employee[] = await res.json();
+            const data = await fetchEmployeeList("/api/employees/account");
             // dispatch(setEmployees(data));
             setEmployeesLocal(data);
         } catch (err: any) {
@@ -278,9 +304,9 @@ export default function WebPageClient(): JSX.Element {
                         loading={loading}
                         error={error}
                         onAddLead={() => setActiveTab("addLead")}
-                        onOpenLeadDetails={(leadId) => {
+                        onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
-                            setSelectedLeadOrigin("leads");
+                            setSelectedLeadOrigin(origin ?? "leads");
                             setActiveTab("leadDetails");
                         }}
                     />
@@ -294,9 +320,9 @@ export default function WebPageClient(): JSX.Element {
                         loading={loading}
                         error={error}
                         onAddLead={() => setActiveTab("addProspect")}
-                        onOpenLeadDetails={(leadId) => {
+                        onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
-                            setSelectedLeadOrigin("Prospect");
+                            setSelectedLeadOrigin(origin ?? "Prospect");
                             setActiveTab("leadDetails");
                         }}
                     />
@@ -311,9 +337,9 @@ export default function WebPageClient(): JSX.Element {
                         error={error}
                         onAddLead={() => setActiveTab("addAccount")}
                         onAddLead2={() => setActiveTab("addLead")}
-                        onOpenLeadDetails={(leadId) => {
+                        onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
-                            setSelectedLeadOrigin("Account");
+                            setSelectedLeadOrigin(origin ?? "Account");
                             setActiveTab("leadDetails");
                         }}
                     />
@@ -345,6 +371,9 @@ export default function WebPageClient(): JSX.Element {
                         }}
                     />
                 );
+
+            case "reports":
+                return <ReportsClient />;
 
             case "editLead":
                 return (
@@ -464,10 +493,10 @@ export default function WebPageClient(): JSX.Element {
                                 "leads",
                                 "Prospect",
                                 "Account",
-                                "Reminder",
+                                "reports",
                             ] as TabKey[]
                         ).map((tab) => {
-                            const label = tab[0].toUpperCase() + tab.slice(1);
+                            const label = getTabLabel(tab);
                             const active = sidebarActiveTab === tab;
                             const icon = tabIcons[tab];
 

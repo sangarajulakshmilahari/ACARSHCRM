@@ -64,19 +64,19 @@ export async function convertLeadWithExistingFlow({
       alert("Converted successfully to Prospect");
       router.push("/webpage?tab=Prospect");
     } else if (convertedTo === "Account") {
-      alert("Converted successfully to Account");
+      alert("Converted successfully to Customer");
       router.push("/webpage?tab=Account");
     } else if (convertedTo === "MasterAccount") {
-      alert("Converted successfully to Master Account");
+      alert("Converted successfully to Master Customer");
       router.push("/webpage?tab=masteraccount");
     } else if (origin === "leads") {
       alert("Converted successfully to Prospect");
       router.push("/webpage?tab=Prospect");
     } else if (origin === "Prospect") {
-      alert("Converted successfully to Account");
+      alert("Converted successfully to Customer");
       router.push("/webpage?tab=Account");
     } else if (origin === "Account") {
-      alert("Converted successfully to Master Account");
+      alert("Converted successfully to Master Customer");
       router.push("/webpage?tab=masteraccount");
     }
   } catch (err: any) {
@@ -109,9 +109,9 @@ export async function convertLeadDirectToAccountWithExistingFlow({
       throw new Error(errorMessage);
     }
 
-    alert("Converted successfully to Account");
+    alert("Converted successfully to Customer");
     router.push("/webpage?tab=Account");
   } catch (err: any) {
-    alert(err.message || "Failed to convert to account");
+    alert(err.message || "Failed to convert to customer");
   }
 }

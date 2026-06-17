@@ -22,14 +22,28 @@ export async function searchLead(pool: any, query: string) {
       l.CompanyLocation,
       l.LeadSource,
       DATE_FORMAT(l.LeadDate, '%Y-%m-%d') AS LeadDate,
-      ls.StatusName,
+      las.StatusName,
       u.UserName AS OwnerName,
       at.Name AS AccountType,
       lc.ContactName,
       lc.ContactEmail,
       lc.ContactPhone
     FROM leads l
-    LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
+    LEFT JOIN (
+      SELECT LeadId, StatusId
+      FROM (
+        SELECT
+          la.LeadId,
+          la.StatusId,
+          ROW_NUMBER() OVER (
+            PARTITION BY la.LeadId
+            ORDER BY la.ActivityDate DESC, la.CreatedOn DESC, la.ActivityId DESC
+          ) AS rn
+        FROM LeadActivities la
+      ) ranked
+      WHERE rn = 1
+    ) latestActivity ON latestActivity.LeadId = l.LeadId
+    LEFT JOIN LeadStatuses las ON latestActivity.StatusId = las.StatusId
     LEFT JOIN Users u ON l.OwnerId = u.UserId
     LEFT JOIN AccountTypes at ON l.AccountTypeId = at.AccountTypeId
     LEFT JOIN LeadContacts lc ON lc.LeadId = l.LeadId
@@ -95,11 +109,25 @@ export async function getLeadDetails(pool: any, leadId: number) {
     SELECT
       l.LeadId, l.CompanyName, l.CompanyLocation, l.LeadSource,
       DATE_FORMAT(l.LeadDate, '%Y-%m-%d') AS LeadDate,
-      l.LeadNotes, ls.StatusName,
+      l.LeadNotes, latestStatus.StatusName,
       at.Name AS AccountTypeName,
       u.UserName AS OwnerName
     FROM Leads l
-    LEFT JOIN LeadStatuses ls ON l.StatusId = ls.StatusId
+    LEFT JOIN (
+      SELECT LeadId, StatusId
+      FROM (
+        SELECT
+          la.LeadId,
+          la.StatusId,
+          ROW_NUMBER() OVER (
+            PARTITION BY la.LeadId
+            ORDER BY la.ActivityDate DESC, la.CreatedOn DESC, la.ActivityId DESC
+          ) AS rn
+        FROM LeadActivities la
+      ) ranked
+      WHERE rn = 1
+    ) latestActivity ON latestActivity.LeadId = l.LeadId
+    LEFT JOIN LeadStatuses latestStatus ON latestStatus.StatusId = latestActivity.StatusId
     LEFT JOIN Users u ON l.OwnerId = u.UserId
     LEFT JOIN AccountTypes at ON l.AccountTypeId = at.AccountTypeId
     WHERE l.LeadId = ?
@@ -271,13 +299,6 @@ export async function createLead(pool: any, params: any) {
       };
     }
 
-    // Resolve StatusId (default: "New")
-    const [statusRows]: any = await conn.query(
-      `SELECT StatusId FROM LeadStatuses WHERE StatusName = ?`,
-      [params.StatusName || "New"]
-    );
-    const StatusId = statusRows[0]?.StatusId ?? 1;
-
     // Resolve OwnerId
     const [ownerRows]: any = await conn.query(
       `SELECT UserId FROM Users WHERE UserName = ?`,
@@ -289,15 +310,14 @@ export async function createLead(pool: any, params: any) {
     const [leadInsert]: any = await conn.query(
       `
       INSERT INTO Leads
-        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, StatusId, OwnerId)
-      VALUES (?, ?, ?, CURDATE(), ?, ?, ?)
+        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, OwnerId)
+      VALUES (?, ?, ?, CURDATE(), ?, ?)
       `,
       [
         companyMatch.value,
         params.CompanyLocation || null,
         sourceMatch.value || null,
         params.Notes || null,
-        StatusId,
         OwnerId,
       ]
     );
@@ -396,15 +416,6 @@ export async function updateLead(pool: any, params: any) {
     }
 
     // Resolve IDs
-    let statusId = null;
-    if (fields.StatusName) {
-      const [rows]: any = await conn.query(
-        `SELECT StatusId FROM LeadStatuses WHERE StatusName = ?`,
-        [fields.StatusName]
-      );
-      if (rows.length) statusId = rows[0].StatusId;
-    }
-
     let ownerId = null;
     if (fields.OwnerName) {
       const [rows]: any = await conn.query(
@@ -433,10 +444,6 @@ export async function updateLead(pool: any, params: any) {
     if (fields.LeadNotes !== undefined) {
       updateFields.push("LeadNotes = ?");
       updateValues.push(fields.LeadNotes);
-    }
-    if (statusId !== null) {
-      updateFields.push("StatusId = ?");
-      updateValues.push(statusId);
     }
     if (ownerId !== null) {
       updateFields.push("OwnerId = ?");

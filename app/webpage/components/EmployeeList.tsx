@@ -3,16 +3,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { formatLocaleDate } from "@/app/utils/dateTime";
 import {
   convertLeadDirectToAccountWithExistingFlow,
   convertLeadWithExistingFlow,
-  type ConvertOrigin,
 } from "../leads/convert-actions";
 
 export type Contact = {
   ContactName: string | null;
-  ContactRoleName: string | null;
-  ContactTitle: string | null;
+    ContactRoleName: string | null;
+    ContactTitle: string | null;
   ContactEmail: string | null;
   ContactPhone: string | null;
 };
@@ -29,10 +29,14 @@ export type Employee = {
   LatestActivityId?: number | string | null;
   LatestActivityNotes?: string | null;
   OwnerName: string | null;
+  AccountTypeId?: number | string | null;
+  AccountTypeName?: string | null;
+  Name?: string | null;
   Contacts: Contact[];
 };
 
 type EntityType = "lead" | "prospect" | "account";
+type DetailsOrigin = "leads" | "Prospect" | "Account";
 
 type Props = {
   employees: Employee[] | null | undefined;
@@ -40,7 +44,10 @@ type Props = {
   error?: string | null;
   onAddLead: () => void;
   onAddLead2?: () => void;
-  onOpenLeadDetails?: (leadId: number | string) => void;
+  onOpenLeadDetails?: (
+    leadId: number | string,
+    origin?: DetailsOrigin
+  ) => void;
   type: EntityType;
 };
 
@@ -150,7 +157,7 @@ export default function EmployeeList({
       case "prospect":
         return "Add Prospect";
       case "account":
-        return "Add Account";
+        return "Add Customer";
       case "lead":
       default:
         return "Add Lead";
@@ -167,10 +174,21 @@ export default function EmployeeList({
 
   const filteredEmployees = useMemo(() => {
     const q = (query || "").toLowerCase();
-    if (!q) return employeesList;
+    const scopedEmployees = employeesList.filter((emp) => {
+      const recordType = getRecordType(emp).type;
 
-    return employeesList.filter((emp) => {
+      if (q && type === "lead") return true;
+      if (q && type === "prospect") return recordType !== "lead";
+
+      return recordType === type;
+    });
+
+    if (!q) return scopedEmployees;
+
+    return scopedEmployees.filter((emp) => {
+      const recordType = getRecordType(emp);
       const haystack = [
+        recordType.label,
         emp.CompanyName,
         emp.CompanyLocation,
         emp.LeadSource,
@@ -193,7 +211,7 @@ export default function EmployeeList({
 
       return haystack.includes(q);
     });
-  }, [employeesList, query]);
+  }, [employeesList, query, type]);
 
   const outreachKpis = useMemo(
     () => [
@@ -268,8 +286,12 @@ export default function EmployeeList({
     MozOsxFontSmoothing: "grayscale",
   };
 
-  const convertOrigin: ConvertOrigin =
-    type === "lead" ? "leads" : type === "prospect" ? "Prospect" : "Account";
+  const searchPlaceholder =
+    type === "lead"
+      ? "Search leads, prospects, customers by company, contact, email, source, status, owner..."
+      : type === "prospect"
+        ? "Search prospects and customers by company, contact, email, source, status, owner..."
+        : "Search customers by company, contact, email, source, status, owner...";
 
   return (
     <div
@@ -430,7 +452,7 @@ export default function EmployeeList({
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
-            placeholder="Search leads by company, contact, email, source, status, owner..."
+            placeholder={searchPlaceholder}
             style={{
               width: "350px",
               marginRight: "300px",
@@ -509,11 +531,16 @@ export default function EmployeeList({
               };
               const statusText = emp.StatusName?.trim() || "";
               const latestActivityNote = emp.LatestActivityNotes?.trim() || "";
+              const recordType = getRecordType(emp);
+              const convertOrigin = getDetailsOrigin(recordType.type);
+              const companyName = emp.CompanyName?.trim() || "-";
 
               return (
                 <tr
                   key={emp.LeadId}
-                  onDoubleClick={() => onOpenLeadDetails?.(emp.LeadId)}
+                  onDoubleClick={() =>
+                    onOpenLeadDetails?.(emp.LeadId, convertOrigin)
+                  }
                   style={{
                     ...rowStyle,
                     cursor: "pointer",
@@ -533,22 +560,26 @@ export default function EmployeeList({
                     </div>
                   </td>
 
-                  <td style={{ ...tdStyle, verticalAlign: "middle" }}>
-                    {emp.CompanyName && emp.CompanyName.trim() !== "" && (
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          fontSize: "inherit",
-                          lineHeight: "inherit",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                        }}
-                        title={emp.CompanyName}
-                      >
-                        {emp.CompanyName}
-                      </div>
-                    )}
+                  <td
+                    style={{
+                      ...tdStyle,
+                      ...getCompanyCellStyle(recordType.type),
+                      verticalAlign: "middle",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "inherit",
+                        lineHeight: "inherit",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                      }}
+                      title={`${companyName} - ${recordType.label}`}
+                    >
+                      {companyName}
+                    </div>
 
                     {emp.CompanyLocation && (
                       <div
@@ -808,7 +839,7 @@ export default function EmployeeList({
                       position: "relative",
                     }}
                   >
-                    {type === "lead" ? (
+                    {recordType.type === "lead" ? (
                       <div
                         data-convert-menu-root="true"
                         style={convertMenuRootStyle}
@@ -883,13 +914,13 @@ export default function EmployeeList({
                               )}
                             >
                               <span style={convertMenuItemLabelStyle}>
-                                Convert to Account
+                                Convert to Customer
                               </span>
                             </button>
                           </div>
                         )}
                       </div>
-                    ) : type === "prospect" ? (
+                    ) : recordType.type === "prospect" ? (
                       <div
                         data-convert-menu-root="true"
                         style={convertMenuRootStyle}
@@ -967,7 +998,7 @@ export default function EmployeeList({
                               )}
                             >
                               <span style={convertMenuItemLabelStyle}>
-                                Convert to Account
+                                Convert to Customer
                               </span>
                             </button>
                           </div>
@@ -1000,11 +1031,53 @@ export default function EmployeeList({
   );
 }
 
+function getRecordType(emp: Employee): {
+  type: EntityType;
+  label: "Lead" | "Prospect" | "Customer";
+} {
+  const accountTypeId = Number(emp.AccountTypeId);
+  const typeName = String(emp.AccountTypeName ?? emp.Name ?? "").toLowerCase();
+
+  if (accountTypeId >= 30 || typeName === "account") {
+    return { type: "account", label: "Customer" };
+  }
+
+  if (accountTypeId >= 20 || typeName === "prospect") {
+    return { type: "prospect", label: "Prospect" };
+  }
+
+  return { type: "lead", label: "Lead" };
+}
+
+function getDetailsOrigin(type: EntityType): DetailsOrigin {
+  if (type === "account") return "Account";
+  if (type === "prospect") return "Prospect";
+  return "leads";
+}
+
+function getCompanyCellStyle(type: EntityType): React.CSSProperties {
+  const palette: Record<EntityType, React.CSSProperties> = {
+    lead: {
+      background: "#ffffff",
+      color: "#334155",
+    },
+    prospect: {
+      background: "#fef3c7",
+      color: "#92400e",
+    },
+    account: {
+      background: "#dcfce7",
+      color: "#166534",
+    },
+  };
+
+  return {
+    ...palette[type],
+  };
+}
+
 function formatDate(value: string | number | Date | null | undefined) {
-  if (!value && value !== 0) return "-";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString();
+  return formatLocaleDate(value, undefined, "-");
 }
 
 const thStyle: React.CSSProperties = {

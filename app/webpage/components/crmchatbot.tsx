@@ -40,7 +40,7 @@ const SUGGESTIONS_BY_ROLE: Record<string, string[]> = {
   admin: [
     "Show full org pipeline",
     "Compare agents by revenue",
-    "Show all accounts",
+    "Show all customers",
   ],
 };
 

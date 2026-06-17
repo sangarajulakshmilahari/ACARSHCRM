@@ -22,7 +22,7 @@ export default function AddLeadPage({
 
   // 🔹 Texts based on type
   const entityLabel: string =
-    type === "prospect" ? "Prospect" : type === "account" ? "Account" : "Lead";
+    type === "prospect" ? "Prospect" : type === "account" ? "Customer" : "Lead";
 
   const entityLabelLower = entityLabel.toLowerCase();
 
@@ -76,7 +76,7 @@ export default function AddLeadPage({
     OwnerName: "",
     AccountType: getAccountType(type),
 
-    // Lead / Prospect / Account Details
+    // Lead / Prospect / Customer Details
     ExpansionAreas: "",
     Tags: "",
     Notes: "",
@@ -334,7 +334,7 @@ const customSelectStyles = {
               </div>
 
               <div>
-                <label style={labelStyle}>Account Type</label>
+                <label style={labelStyle}>Customer Type</label>
                 <input
                   type="text"
                   name="AccountType"
