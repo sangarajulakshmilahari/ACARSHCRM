@@ -58,7 +58,38 @@ export async function GET(
       const [projects]: any = await conn.query(query, queryParams);
 
       if (projectId) {
-        return NextResponse.json(projects?.[0] ?? null);
+        const project = projects?.[0] ?? null;
+
+        if (!project) {
+          return NextResponse.json(null);
+        }
+
+        const [teamMembers]: any = await conn.query(
+          `
+          SELECT DISTINCT
+            e.id AS EmployeeId,
+            e.name AS EmployeeName
+          FROM Customers c
+          INNER JOIN Projects p
+            ON p.CustomerId = c.CustomerId
+          INNER JOIN aaram_project_map app
+            ON p.ProjectId = app.aaram_project_id
+          INNER JOIN aaram_db.employee_project_assignment epa
+            ON epa.project_id = app.aaram_project_id
+          INNER JOIN aaram_db.employee e
+            ON e.id = epa.employee_id
+          WHERE p.CustomerId = ?
+            AND p.ProjectId = ?
+            AND e.active = 1
+          ORDER BY e.name ASC
+          `,
+          [leadId, projectId]
+        );
+
+        return NextResponse.json({
+          ...project,
+          TeamMembers: Array.isArray(teamMembers) ? teamMembers : [],
+        });
       }
 
       return NextResponse.json(projects);

@@ -71,6 +71,10 @@ type Project = {
   StartDate?: string;
   EndDate?: string;
   Status?: string;
+  TeamMembers?: Array<{
+    EmployeeId?: number | string;
+    EmployeeName?: string | null;
+  }>;
 };
 
 type Lead = {
@@ -168,6 +172,7 @@ export default function LeadDetailsClient({
   const [projectActionLoading, setProjectActionLoading] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState({
     ProjectId: null as number | null,
+    ProjectCode: "",
     ProjectName: "",
     ProjectDesc: "",
     TechStack: "",
@@ -181,6 +186,13 @@ export default function LeadDetailsClient({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showProjectSummary, setShowProjectSummary] = useState(false);
   const [projectSummaryLoading, setProjectSummaryLoading] = useState(false);
+  const [projectSummaryAccordions, setProjectSummaryAccordions] = useState({
+    techStack: true,
+    keyWork: true,
+    valueAdded: true,
+    deliverables: true,
+    challenges: true,
+  });
 
 
 
@@ -508,9 +520,47 @@ export default function LeadDetailsClient({
       .filter(Boolean);
   };
 
+  const getProjectTeamMembers = () => {
+    if (!selectedProject?.TeamMembers || !Array.isArray(selectedProject.TeamMembers)) {
+      return [] as Array<{ EmployeeId?: number | string; EmployeeName?: string | null }>;
+    }
+
+    return selectedProject.TeamMembers.filter((member) => {
+      const name = member?.EmployeeName;
+      return typeof name === "string" && name.trim().length > 0;
+    });
+  };
+
+  const toggleProjectSummaryAccordion = (
+    key: "techStack" | "keyWork" | "valueAdded" | "deliverables" | "challenges"
+  ) => {
+    setProjectSummaryAccordions((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const resetProjectSummaryAccordions = () => {
+    setProjectSummaryAccordions({
+      techStack: true,
+      keyWork: true,
+      valueAdded: true,
+      deliverables: true,
+      challenges: true,
+    });
+  };
+
   const formatProjectDate = (value?: string | null) => {
     if (!value) return "Not Available";
     return formatLocaleDate(value, undefined, "Not Available");
+  };
+
+  const getProjectStartDateDisplay = () => {
+    return "Jan 1, 2026";
+  };
+
+  const getProjectEndDateDisplay = () => {
+    return "Ongoing";
   };
 
   const formatPointsForEditor = (value?: string | null) => {
@@ -532,6 +582,7 @@ export default function LeadDetailsClient({
   const resetProjectForm = () => {
     setProjectForm({
       ProjectId: null,
+      ProjectCode: "",
       ProjectName: "",
       ProjectDesc: "",
       TechStack: "",
@@ -554,6 +605,7 @@ export default function LeadDetailsClient({
     setProjectFormMode("edit");
     setProjectForm({
       ProjectId: project.ProjectId,
+      ProjectCode: project.ProjectCode || "",
       ProjectName: project.ProjectName || "",
       ProjectDesc: project.ProjectDesc || "",
       TechStack: project.TechStack || "",
@@ -593,6 +645,7 @@ export default function LeadDetailsClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(projectFormMode === "edit" ? { ProjectId: projectForm.ProjectId } : {}),
+          ProjectCode: projectForm.ProjectCode.trim() || null,
           ProjectName: projectForm.ProjectName,
           ProjectDesc: projectForm.ProjectDesc || null,
           TechStack: projectForm.TechStack || null,
@@ -663,6 +716,7 @@ export default function LeadDetailsClient({
 
       const project = await res.json();
       setSelectedProject(project || null);
+      resetProjectSummaryAccordions();
       setShowProjectSummary(true);
     } catch (err) {
       console.error("Failed to load project details:", err);
@@ -2393,8 +2447,8 @@ export default function LeadDetailsClient({
                           {p.ProjectName}
                         </td>
                         {/* <td style={tdStyle}>{p.CompanyName}</td> */}
-                        <td style={tdStyle}>{p.StartDate || "—"}</td>
-                        <td style={tdStyle}>{p.EndDate || "—"}</td>
+                        <td style={tdStyle}>{getProjectStartDateDisplay()}</td>
+                        <td style={tdStyle}>{getProjectEndDateDisplay()}</td>
                         <td style={tdStyle}>
                           <span
                             style={{
@@ -2409,8 +2463,8 @@ export default function LeadDetailsClient({
                             {p.Status || "Active"}
                           </span>
                         </td>
-                        <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
                             <button
                               type="button"
                               onClick={() => openEditProjectForm(p)}
@@ -2488,7 +2542,7 @@ export default function LeadDetailsClient({
                       {toDisplayValue(selectedProject.ProjectName)}
                     </div>
                     <div style={{ fontSize: 12, opacity: 0.95, marginTop: 4 }}>
-                      Customer: {toDisplayValue(lead?.CompanyName)} • Status: {toDisplayValue(selectedProject.Status || "Active")} • Start: {formatProjectDate(selectedProject.StartDate)} • End: {selectedProject.EndDate ? formatProjectDate(selectedProject.EndDate) : "Ongoing"}
+                      Customer: {toDisplayValue(lead?.CompanyName)} • Status: {toDisplayValue(selectedProject.Status || "Active")} • Start: {getProjectStartDateDisplay()} • End: {getProjectEndDateDisplay()}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2540,41 +2594,204 @@ export default function LeadDetailsClient({
                       background: "#fff",
                       border: "1px solid #e2e8f0",
                       borderRadius: 10,
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      gridColumn: "1 / -1",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleProjectSummaryAccordion("techStack")}
+                      aria-expanded={projectSummaryAccordions.techStack}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: "#fff",
+                        padding: "10px 12px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Tech Stack
+                      </span>
+                      <span style={{ color: "#64748b", fontSize: 13 }}>
+                        {projectSummaryAccordions.techStack ? "▲" : "▼"}
+                      </span>
+                    </button>
+
+                    {projectSummaryAccordions.techStack && (
+                      <div style={{ marginTop: -2, padding: "0 12px 10px", color: "#0f172a", lineHeight: 1.5 }}>
+                        {toDisplayValue(selectedProject.TechStack)}
+                      </div>
+                    )}
+                  </section>
+
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
                       padding: "10px 12px",
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
                       gridColumn: "1 / -1",
                     }}
                   >
-                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                      Tech Stack
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Project Team
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#475569",
+                          fontWeight: 600,
+                          background: "#f1f5f9",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 999,
+                          padding: "2px 10px",
+                        }}
+                      >
+                        {getProjectTeamMembers().length} Member{getProjectTeamMembers().length === 1 ? "" : "s"}
+                      </div>
                     </div>
-                    <div style={{ marginTop: 6, color: "#0f172a", lineHeight: 1.5 }}>
-                      {toDisplayValue(selectedProject.TechStack)}
-                    </div>
+
+                    {getProjectTeamMembers().length > 0 ? (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr",
+                            gap: 0,
+                            background: "#f8fafc",
+                            borderBottom: "1px solid #e2e8f0",
+                            padding: "6px 10px",
+                            fontSize: 11,
+                            color: "#64748b",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.2,
+                          }}
+                        >
+                          <span>Employee Name</span>
+                        </div>
+
+                        <div style={{ maxHeight: 170, overflowY: "auto" }}>
+                          {getProjectTeamMembers().map((member, index) => (
+                            <div
+                              key={`${member.EmployeeId ?? "member"}-${index}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr",
+                                gap: 0,
+                                padding: "8px 10px",
+                                borderBottom:
+                                  index === getProjectTeamMembers().length - 1
+                                    ? "none"
+                                    : "1px solid #f1f5f9",
+                                fontSize: 14,
+                                color: "#0f172a",
+                                alignItems: "center",
+                              }}
+                            >
+                              <span style={{ fontWeight: 500 }}>
+                                {toDisplayValue(member.EmployeeName)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+                        No team members assigned.
+                      </div>
+                    )}
                   </section>
 
                   {([
-                    { title: "Key Work", body: toDisplayPoints(selectedProject.KeyWork), Icon: Wrench },
-                    { title: "Value Added", body: toDisplayPoints(selectedProject.ValueAdded), Icon: Star },
-                    { title: "Deliverables", body: toDisplayPoints(selectedProject.Deliverables), Icon: Package },
-                    { title: "Challenges", body: toDisplayPoints(selectedProject.Challenges), Icon: AlertTriangle },
-                  ] as Array<{ title: string; body: string[]; Icon: any }>).map(({ title, body, Icon }) => (
+                    {
+                      title: "Key Work",
+                      body: toDisplayPoints(selectedProject.KeyWork),
+                      Icon: Wrench,
+                      keyName: "keyWork" as const,
+                    },
+                    {
+                      title: "Value Added",
+                      body: toDisplayPoints(selectedProject.ValueAdded),
+                      Icon: Star,
+                      keyName: "valueAdded" as const,
+                    },
+                    {
+                      title: "Deliverables",
+                      body: toDisplayPoints(selectedProject.Deliverables),
+                      Icon: Package,
+                      keyName: "deliverables" as const,
+                    },
+                    {
+                      title: "Challenges",
+                      body: toDisplayPoints(selectedProject.Challenges),
+                      Icon: AlertTriangle,
+                      keyName: "challenges" as const,
+                    },
+                  ] as Array<{
+                    title: string;
+                    body: string[];
+                    Icon: any;
+                    keyName: "keyWork" | "valueAdded" | "deliverables" | "challenges";
+                  }>).map(({ title, body, Icon, keyName }) => (
                     <section
                       key={title}
                       style={{
                         background: "#fff",
                         border: "1px solid #e2e8f0",
                         borderRadius: 10,
-                        padding: "10px 12px",
                         boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                        overflow: "hidden",
                       }}
                     >
-                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <Icon size={14} />
-                        <span>{title}</span>
-                      </div>
-                      {Array.isArray(body) && (
-                        <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20, color: "#0f172a", lineHeight: 1.6 }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleProjectSummaryAccordion(keyName)}
+                        aria-expanded={projectSummaryAccordions[keyName]}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background: "#fff",
+                          padding: "10px 12px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Icon size={14} />
+                          <span>{title}</span>
+                        </span>
+                        <span style={{ color: "#64748b", fontSize: 13 }}>
+                          {projectSummaryAccordions[keyName] ? "▲" : "▼"}
+                        </span>
+                      </button>
+
+                      {projectSummaryAccordions[keyName] && Array.isArray(body) && (
+                        <ul style={{ marginTop: -2, marginBottom: 10, paddingLeft: 32, paddingRight: 12, color: "#0f172a", lineHeight: 1.6 }}>
                           {body.map((point, index) => (
                             <li key={`${title}-${index}`}>{point}</li>
                           ))}
@@ -2632,6 +2849,12 @@ export default function LeadDetailsClient({
                 </div>
 
                 <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <input
+                    style={{ ...inputBox, width: "100%" }}
+                    placeholder="Project Code"
+                    value={projectForm.ProjectCode}
+                    onChange={(e) => setProjectForm((prev) => ({ ...prev, ProjectCode: e.target.value }))}
+                  />
                   <input
                     style={{ ...inputBox, width: "100%" }}
                     placeholder="Project Name*"
