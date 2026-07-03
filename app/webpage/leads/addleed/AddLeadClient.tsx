@@ -158,8 +158,12 @@ const customSelectStyles = {
     minHeight: "38px",
     height: "38px",
     borderRadius: "8px",
-    borderColor: "#d8e1ef",
+    borderColor: "rgba(31, 58, 104, 0.2)",
     fontSize: "13px",
+    boxShadow: "none",
+    "&:hover": {
+      borderColor: "#F26522",
+    },
   }),
   valueContainer: (base: any) => ({
     ...base,
@@ -180,7 +184,7 @@ const customSelectStyles = {
     <div
       style={{
         padding: 22,
-        fontFamily: "Segoe UI, system-ui, sans-serif",
+        fontFamily: "var(--font-body)",
         width: "100%",
         overflowY: "auto",
         boxSizing: "border-box",
@@ -205,7 +209,7 @@ const customSelectStyles = {
         <button
           onClick={onBack}
           style={{
-            background: "#f56c00",
+            background: "#F26522",
             color: "white",
             padding: "9px 16px",
             borderRadius: 8,
@@ -213,7 +217,7 @@ const customSelectStyles = {
             cursor: "pointer",
             fontSize: 14,
             fontWeight: 600,
-            boxShadow: "0 6px 14px rgba(245, 108, 0, 0.25)",
+            boxShadow: "0 6px 14px rgba(242, 101, 34, 0.25)",
           }}
         >
           ← Back
@@ -641,8 +645,8 @@ const customSelectStyles = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 13,
-  fontWeight: 500,
-  color: "#374151",
+  fontWeight: 600,
+  color: "#1F3A68",
 };
 
 const sectionBody: React.CSSProperties = {
@@ -654,22 +658,24 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "10px 12px",
   borderRadius: 8,
-  border: "1px solid #d8e1ef",
+  border: "1px solid rgba(31, 58, 104, 0.2)",
   marginTop: 4,
   fontSize: 13,
   boxSizing: "border-box",
+  color: "#0F1F3D",
 };
 
 const textareaStyle: React.CSSProperties = {
   width: "100%",
   padding: "10px 12px",
   borderRadius: 8,
-  border: "1px solid #d8e1ef",
+  border: "1px solid rgba(31, 58, 104, 0.2)",
   marginTop: 4,
   height: 80,
   fontSize: 13,
   resize: "none",
   boxSizing: "border-box",
+  color: "#0F1F3D",
 };
 
 const grid3: React.CSSProperties = {
@@ -682,13 +688,13 @@ const boxWrapper: React.CSSProperties = {
   marginTop: 20,
   background: "#ffffff",
   borderRadius: 12,
-  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
+  boxShadow: "0 12px 28px rgba(15, 31, 61, 0.08)",
   padding: 0,
-  border: "1px solid #e7edf6",
+  border: "1px solid rgba(31, 58, 104, 0.14)",
 };
 
 const boxHeader: React.CSSProperties = {
-  background: "linear-gradient(90deg, #3a77e3 0%, #2459d3 100%)",
+  background: "linear-gradient(90deg, #1F3A68 0%, #0F1F3D 100%)",
   color: "#fff",
   padding: "11px 16px",
   fontWeight: 600,
@@ -698,7 +704,7 @@ const boxHeader: React.CSSProperties = {
 };
 
 const btnPrimary: React.CSSProperties = {
-  background: "#3a77e3",
+  background: "#F26522",
   color: "white",
   padding: "10px 20px",
   fontSize: 14,
@@ -706,16 +712,16 @@ const btnPrimary: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   fontWeight: 600,
-  boxShadow: "0 8px 20px rgba(58, 119, 227, 0.24)",
+  boxShadow: "0 8px 20px rgba(242, 101, 34, 0.24)",
 };
 
 const btnSecondary: React.CSSProperties = {
-  background: "#e2e8f0",
-  color: "#334155",
+  background: "#ffffff",
+  color: "#1F3A68",
   padding: "10px 18px",
   fontSize: 14,
   borderRadius: 8,
-  border: "none",
+  border: "1px solid rgba(31, 58, 104, 0.18)",
   cursor: "pointer",
   fontWeight: 600,
 };

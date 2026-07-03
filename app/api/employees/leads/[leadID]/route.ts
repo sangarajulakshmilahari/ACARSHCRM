@@ -117,6 +117,8 @@ WHERE l.LeadId = ?
         `
         SELECT
           o.OpportunityId,
+          o.ProjectId,
+          pr.ProjectName,
           DATE_FORMAT(o.CreatedOn, '%Y-%m-%d') AS CreatedDate,
           s.ServiceName AS Service,
           pm.ProbabilityRange AS Probability,
@@ -125,6 +127,7 @@ WHERE l.LeadId = ?
           tech.Technology,
           cnt.OpportunityContact
         FROM Opportunities o
+        LEFT JOIN Projects pr ON o.ProjectId = pr.ProjectId
         LEFT JOIN Services s ON o.ServiceId = s.ServiceId
         LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId
         LEFT JOIN Probability pm ON o.ProbabilityId = pm.ProbabilityId
@@ -133,7 +136,7 @@ WHERE l.LeadId = ?
           SELECT
             oc.OpportunityId,
             GROUP_CONCAT(sc.SubCategoryName SEPARATOR ', ') AS Technology
-          FROM Opportunity_Categories oc
+          FROM Opportunity_categories oc
           JOIN SubCategory sc ON oc.SubCategoryId = sc.SubCategoryId
           GROUP BY oc.OpportunityId
         ) tech ON tech.OpportunityId = o.OpportunityId

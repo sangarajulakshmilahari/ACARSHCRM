@@ -343,15 +343,15 @@ export default function EditLeadClient({
     padding: 22,
     borderRadius: 12,
     marginBottom: 20,
-    border: "1px solid #e7edf6",
-    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
+    border: "1px solid rgba(31, 58, 104, 0.14)",
+    boxShadow: "0 10px 24px rgba(15, 31, 61, 0.08)",
   };
 
   const labelStyle: React.CSSProperties = {
     fontWeight: 600,
     marginBottom: 6,
     display: "block",
-    color: "#444",
+    color: "#1F3A68",
     fontSize: 13,
   };
   const rowStyle: React.CSSProperties = {
@@ -365,7 +365,7 @@ export default function EditLeadClient({
     width: "100%",
     padding: "12px 14px",
     borderRadius: 8,
-    border: "1px solid #d8e1ef",
+    border: "1px solid rgba(31, 58, 104, 0.2)",
     boxSizing: "border-box",
     fontSize: 14,
     background: "#fff",
@@ -411,7 +411,7 @@ export default function EditLeadClient({
         <button
         onClick={onBack}
         style={{
-          background: "#f56c00",
+          background: "#F26522",
           color: "white",
           padding: "9px 16px",
           borderRadius: 8,
@@ -419,14 +419,14 @@ export default function EditLeadClient({
           cursor: "pointer",
           fontSize: 14,
           fontWeight: 600,
-          boxShadow: "0 6px 14px rgba(245, 108, 0, 0.25)",
+          boxShadow: "0 6px 14px rgba(242, 101, 34, 0.25)",
         }}
       >
         ← Back
       </button>
       </div>
       
-       <hr style={{ marginBottom: 20, border: "1px solid #3a77e3" }} />
+       <hr style={{ marginBottom: 20, border: "1px solid #F26522" }} />
      
       {/* Company Information */}
       <section style={cardStyle}>
@@ -585,13 +585,13 @@ export default function EditLeadClient({
             onClick={addContact}
             style={{
               padding: "10px 14px",
-              background: "#2563eb",
+              background: "#F26522",
               border: "none",
               color: "#fff",
               borderRadius: 8,
               cursor: "pointer",
               fontWeight: 700,
-              boxShadow: "0 6px 14px rgba(37, 99, 235, 0.24)",
+              boxShadow: "0 6px 14px rgba(242, 101, 34, 0.24)",
             }}
           >
             + Add Contact
@@ -635,7 +635,7 @@ export default function EditLeadClient({
                       border: "none",
                       cursor: "pointer",
                       borderBottom: "1px solid #edf2fb",
-                      background: isSelected ? "#eaf1ff" : "transparent",
+                      background: isSelected ? "rgba(242, 101, 34, 0.08)" : "transparent",
                       padding: "12px 14px",
                     }}
                     aria-current={isSelected ? "true" : undefined}
@@ -690,7 +690,7 @@ export default function EditLeadClient({
                   <button
                     onClick={() => removeContact(selectedContactIndex)}
                     style={{
-                      background: "#ff1f6b",
+                      background: "#dc2626",
                       color: "#fff",
                       border: "none",
                       padding: "8px 12px",
@@ -1057,7 +1057,7 @@ export default function EditLeadClient({
                 padding: "10px 18px",
                 borderRadius: 8,
                 border: "none",
-                background: "#2459d3",
+                background: "#F26522",
                 color: "#fff",
                 fontWeight: 700,
                 cursor: isDirty && !saving ? "pointer" : "not-allowed",
@@ -1065,7 +1065,7 @@ export default function EditLeadClient({
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-                boxShadow: "0 6px 14px rgba(36, 89, 211, 0.22)",
+                boxShadow: "0 6px 14px rgba(242, 101, 34, 0.22)",
                 minWidth: 170,
                 opacity: isDirty && !saving ? 1 : 0.65,
               }}

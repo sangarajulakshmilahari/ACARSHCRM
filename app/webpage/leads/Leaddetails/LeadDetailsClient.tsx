@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { formatLocaleDate } from "@/app/utils/dateTime";
 import {
@@ -38,6 +39,8 @@ type Reminder = {
 
 type Opportunity = {
   OpportunityId: number;
+  ProjectId?: number | null;
+  ProjectName?: string | null;
 
   // IDs (used for edit)
   ServiceId: number;
@@ -74,6 +77,12 @@ type Project = {
   TeamMembers?: Array<{
     EmployeeId?: number | string;
     EmployeeName?: string | null;
+  }>;
+  ProjectContacts?: Array<{
+    ContactId?: number;
+    ProjectId?: number;
+    ContactName?: string | null;
+    ContactTypeId?: number;
   }>;
 };
 
@@ -347,6 +356,7 @@ export default function LeadDetailsClient({
 
   const resetOpportunityForm = () => {
     setOpportunityForm({
+      projectId: "",
       serviceId: "",
       probabilityId: "",
       statusId: "",
@@ -356,12 +366,59 @@ export default function LeadDetailsClient({
   };
 
   const [opportunityForm, setOpportunityForm] = useState({
+    projectId: "" as number | "",
     serviceId: "" as number | "",
     statusId: "" as number | "",
     probabilityId: "" as number | "",
     engagementId: "" as number | "",
     technologies: [] as number[],
   });
+
+  const getActiveProjectsForOpportunity = () => {
+    return (lead?.Projects || []).filter(
+      (project) => String(project.Status || "Active").toLowerCase() !== "hidden"
+    );
+  };
+
+  const mapProjectContactsToOppContacts = (project: Project | null | undefined) => {
+    const contacts = project?.ProjectContacts || [];
+    return contacts
+      .filter((contact) => (contact.ContactName || "").trim().length > 0)
+      .map((contact) => ({
+        FullName: contact.ContactName || "",
+        CompanyName: lead?.CompanyName || project?.CompanyName || "",
+      })) as OppContact[];
+  };
+
+  const handleOpportunityProjectChange = async (projectIdValue: number | "") => {
+    setOpportunityForm((prev) => ({ ...prev, projectId: projectIdValue }));
+
+    if (!effectiveLeadId || !projectIdValue) {
+      setOppContacts([]);
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${Number(projectIdValue)}`
+      );
+
+      if (!res.ok) {
+        setOppContacts([]);
+        return;
+      }
+
+      const projectDetails = (await res.json()) as Project | null;
+      const mappedContacts = mapProjectContactsToOppContacts(projectDetails);
+
+      setOppContacts(mappedContacts);
+      setSelectedOppContactIndex(null);
+      setOppContactForm(EMPTY_OPP_CONTACT_FORM);
+    } catch (err) {
+      console.error("Failed to load project contacts for opportunity:", err);
+      setOppContacts([]);
+    }
+  };
 
   const handleAddOpportunityClick = () => {
     setMode("add");
@@ -374,6 +431,11 @@ export default function LeadDetailsClient({
     setOppContacts([]);
     setOppContactForm(EMPTY_OPP_CONTACT_FORM);
     setSelectedOppContactIndex(null);
+
+    const activeProjects = getActiveProjectsForOpportunity();
+    if (activeProjects.length === 1) {
+      handleOpportunityProjectChange(activeProjects[0].ProjectId);
+    }
 
     setOpportunityView("OPPORTUNITY");
     setShowAddOpportunity(true);
@@ -527,6 +589,22 @@ export default function LeadDetailsClient({
 
     return selectedProject.TeamMembers.filter((member) => {
       const name = member?.EmployeeName;
+      return typeof name === "string" && name.trim().length > 0;
+    });
+  };
+
+  const getProjectContacts = () => {
+    if (!selectedProject?.ProjectContacts || !Array.isArray(selectedProject.ProjectContacts)) {
+      return [] as Array<{
+        ContactId?: number;
+        ProjectId?: number;
+        ContactName?: string | null;
+        ContactTypeId?: number;
+      }>;
+    }
+
+    return selectedProject.ProjectContacts.filter((contact) => {
+      const name = contact?.ContactName;
       return typeof name === "string" && name.trim().length > 0;
     });
   };
@@ -859,6 +937,7 @@ export default function LeadDetailsClient({
 
     /* 2️⃣ SET OPPORTUNITY FORM */
     setOpportunityForm({
+      projectId: oppData.ProjectId ?? "",
       serviceId: oppData.ServiceId,
       statusId: oppData.StatusId,
       probabilityId: oppData.ProbabilityId,
@@ -960,6 +1039,11 @@ export default function LeadDetailsClient({
       return;
     }
 
+    if (!opportunityForm.projectId) {
+      alert("Please select a project");
+      return;
+    }
+
     if (isEdit && !currentOpportunityId) {
       alert("Opportunity ID missing");
       return;
@@ -1000,6 +1084,8 @@ export default function LeadDetailsClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...(isEdit && { OpportunityId: currentOpportunityId }),
+
+        projectId: opportunityForm.projectId,
 
         serviceId: opportunityForm.serviceId,
         statusId: opportunityForm.statusId,
@@ -1056,6 +1142,8 @@ export default function LeadDetailsClient({
             o.OpportunityId === OpportunityId
               ? {
                 ...o,
+                ProjectId: savedOpportunity.ProjectId,
+                ProjectName: savedOpportunity.ProjectName,
                 Service: savedOpportunity.Service,
                 Probability: savedOpportunity.Probability,
                 Status: savedOpportunity.Status,
@@ -1309,30 +1397,30 @@ export default function LeadDetailsClient({
     padding: "8px 12px",
     borderRadius: 6,
     border: "none",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#ffffff",
     cursor: "pointer",
     fontWeight: 600,
-    boxShadow: "0 4px 10px rgba(58, 119, 227, 0.25)",
+    boxShadow: "0 4px 10px rgba(242, 101, 34, 0.25)",
   };
 
   const primaryBtn: React.CSSProperties = {
     padding: "9px 14px",
     borderRadius: 8,
     border: "none",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#fff",
     cursor: "pointer",
     fontWeight: 600,
-    boxShadow: "0 8px 18px rgba(58, 119, 227, 0.22)",
+    boxShadow: "0 8px 18px rgba(242, 101, 34, 0.22)",
   };
 
   const secondaryBtn: React.CSSProperties = {
     padding: "8px 12px",
     borderRadius: 8,
-    border: "1px solid #3a77e3",
+    border: "1px solid #F26522",
     background: "#fff",
-    color: "#3a77e3",
+    color: "#F26522",
     cursor: "pointer",
     fontWeight: 600,
   };
@@ -1364,7 +1452,7 @@ export default function LeadDetailsClient({
     border: "1px solid #eef1f4",
     boxShadow: "0 6px 14px rgba(15, 23, 42, 0.05)",
     marginBottom: 12,
-    borderLeft: "4px solid #1e90ff",
+    borderLeft: "4px solid #F26522",
   };
 
   const contactAccentStyle: React.CSSProperties = {
@@ -1400,7 +1488,7 @@ export default function LeadDetailsClient({
   };
 
   const contactLinkStyle: React.CSSProperties = {
-    color: "#2563eb",
+    color: "#1F3A68",
     textDecoration: "none",
     overflowWrap: "anywhere",
   };
@@ -1494,7 +1582,7 @@ export default function LeadDetailsClient({
   };
 
   const addBtn = {
-    backgroundColor: "#3a77e3",
+    backgroundColor: "#F26522",
     color: "white",
     width: 24,
     height: 24,
@@ -1533,7 +1621,7 @@ export default function LeadDetailsClient({
   };
 
   const modalHeader: React.CSSProperties = {
-    background: "#3a77e3",
+    background: "#F26522",
     color: "white",
     padding: "14px 20px",
     fontSize: 15,
@@ -1593,7 +1681,7 @@ export default function LeadDetailsClient({
 
   const saveBtn: React.CSSProperties = {
     padding: "8px 15px",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#fff",
     borderRadius: 4,
     border: "none",
@@ -1663,7 +1751,7 @@ export default function LeadDetailsClient({
                     style={{
                       ...dropdownItem,
                       backgroundColor: hoveredItem === "prospect" ? "#f1f5f9" : "#fff",
-                      color: hoveredItem === "prospect" ? "#2563eb" : "#333",
+                      color: hoveredItem === "prospect" ? "#1F3A68" : "#333",
                       cursor: "pointer",
                       transform: hoveredItem === "prospect" ? "scale(1.03)" : "scale(1)",
                       transition: "all 0.15s ease",
@@ -1679,7 +1767,7 @@ export default function LeadDetailsClient({
                     style={{
                       ...dropdownItem,
                       backgroundColor: hoveredItem === "account" ? "#f1f5f9" : "#fff",
-                      color: hoveredItem === "account" ? "#2563eb" : "#333",
+                      color: hoveredItem === "account" ? "#1F3A68" : "#333",
                       cursor: "pointer",
                       transform: hoveredItem === "account" ? "scale(1.03)" : "scale(1)",
                       transition: "all 0.15s ease",
@@ -1764,8 +1852,9 @@ export default function LeadDetailsClient({
             <span
               style={{
                 padding: "2px 8px",
-                background: "#e8f3ff",
+                background: "#eef2f7",
                 borderRadius: 12,
+                color: "#1F3A68",
               }}
             >
               {lead.StatusName}
@@ -1834,11 +1923,11 @@ export default function LeadDetailsClient({
                       ...contactCardStyle,
                       cursor: "pointer",
                       borderLeft: isSelected
-                        ? "4px solid #1e90ff"
+                        ? "4px solid #F26522"
                         : "4px solid #cbd8ea",
-                      background: isSelected ? "#eef5ff" : "#fff",
+                      background: isSelected ? "#fff4ee" : "#fff",
                       boxShadow: isSelected
-                        ? "0 0 0 2px #1e90ff44"
+                        ? "0 0 0 2px rgba(242, 101, 34, 0.25)"
                         : "0 1px 3px rgba(0,0,0,0.06)",
                       transition: "all 0.15s ease",
                     }}
@@ -1870,7 +1959,7 @@ export default function LeadDetailsClient({
                       {c.ContactEmail && (
                         <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 10 }}>
                           <div style={contactRowLabel}>Email:</div>
-                          <div style={{ fontSize: 13, color: "#3a77e3", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <div style={{ fontSize: 13, color: "#F26522", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             <a
                               href={`mailto:${c.ContactEmail}`}
                               title={c.ContactEmail}
@@ -1901,7 +1990,7 @@ export default function LeadDetailsClient({
                                   { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ EmailSent: newVal }) }
                                 );
                               }}
-                              style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                              style={{ accentColor: "#F26522", cursor: "pointer" }}
                             />
                             Email Sent
                           </label>
@@ -1912,7 +2001,7 @@ export default function LeadDetailsClient({
                         <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6, gap: 10 }}>
                           <div style={contactRowLabel}>LinkedIn:</div>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, color: "#3a77e3", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <div style={{ fontSize: 13, color: "#F26522", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               <a
                                 href={`https://${c.LinkedInProfile}`}
                                 target="_blank"
@@ -1953,7 +2042,7 @@ export default function LeadDetailsClient({
                                         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: newVal }) }
                                       );
                                     }}
-                                    style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                                    style={{ accentColor: "#F26522", cursor: "pointer" }}
                                   />
                                   {label}
                                 </label>
@@ -1975,7 +2064,7 @@ export default function LeadDetailsClient({
                               padding: "5px 14px",
                               fontSize: 12,
                               fontWeight: 600,
-                              background: "#1e90ff",
+                              background: "#F26522",
                               color: "#fff",
                               border: "none",
                               borderRadius: 5,
@@ -2264,6 +2353,7 @@ export default function LeadDetailsClient({
         >
           <thead>
             <tr>
+              <th style={{ ...thStyle, width: 180 }}>Project</th>
               <th style={{ ...thStyle, width: 150 }}>Service</th>
               <th style={{ ...thStyle, width: 120 }}>Probability</th>
               <th style={{ ...thStyle, width: 200 }}>Status</th>
@@ -2280,6 +2370,7 @@ export default function LeadDetailsClient({
                 style={{ cursor: "pointer" }}
                 onClick={() => handleEditOpportunity(o)}
               >
+                <td style={tdStyle}>{o.ProjectName || "-"}</td>
                 <td style={tdStyle}>{o.Service}</td>
                 <td style={tdStyle}>{o.Probability}</td>
                 <td style={tdStyle}>{o.Status}</td>
@@ -2315,7 +2406,7 @@ export default function LeadDetailsClient({
 
             {(!lead.Opportunities || lead.Opportunities.length === 0) && (
               <tr>
-                <td colSpan={5} style={tdStyle}>
+                <td colSpan={7} style={tdStyle}>
                   No opportunities
                 </td>
               </tr>
@@ -2443,7 +2534,7 @@ export default function LeadDetailsClient({
                         style={{ cursor: "pointer" }}
                         onClick={() => handleOpenProjectSummary(p.ProjectId)}
                       >
-                        <td style={{ ...tdStyle, color: "#1d4ed8", fontWeight: 600 }}>
+                        <td style={{ ...tdStyle, color: "#1F3A68", fontWeight: 600 }}>
                           {p.ProjectName}
                         </td>
                         {/* <td style={tdStyle}>{p.CompanyName}</td> */}
@@ -2469,9 +2560,9 @@ export default function LeadDetailsClient({
                               type="button"
                               onClick={() => openEditProjectForm(p)}
                               style={{
-                                border: "1px solid #93c5fd",
-                                background: "#eff6ff",
-                                color: "#1d4ed8",
+                                border: "1px solid rgba(31, 58, 104, 0.28)",
+                                background: "#eef2f7",
+                                color: "#1F3A68",
                                 borderRadius: 6,
                                 padding: "4px 9px",
                                 fontSize: 12,
@@ -2510,23 +2601,34 @@ export default function LeadDetailsClient({
             </div>
           )}
 
-          {showProjectSummary && selectedProject && (
-            <div style={{ ...modalOverlay, zIndex: 10001 }} onClick={() => setShowProjectSummary(false)}>
+          {showProjectSummary && selectedProject && typeof window !== "undefined" &&
+            createPortal(
               <div
                 style={{
-                  background: "#f8fafc",
-                  width: "min(1200px, 78vw)",
-                  maxHeight: "85vh",
-                  borderRadius: 12,
-                  overflowY: "auto",
-                  border: "1px solid #dbeafe",
-                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                  ...modalOverlay,
+                  zIndex: 10001,
+                  alignItems: "flex-start",
+                  paddingTop: 84,
+                  backdropFilter: "blur(4px)",
+                  WebkitBackdropFilter: "blur(4px)",
                 }}
-                onClick={(e) => e.stopPropagation()}
+                onClick={() => setShowProjectSummary(false)}
               >
                 <div
                   style={{
-                    background: "linear-gradient(90deg, #1d4ed8, #2563eb)",
+                    background: "#f8fafc",
+                    width: "min(1200px, 78vw)",
+                    maxHeight: "85vh",
+                    borderRadius: 12,
+                    overflowY: "auto",
+                    border: "1px solid rgba(31, 58, 104, 0.22)",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                <div
+                  style={{
+                    background: "#1F3A68",
                     color: "#fff",
                     padding: "12px 18px",
                     display: "flex",
@@ -2578,7 +2680,6 @@ export default function LeadDetailsClient({
                       borderRadius: 10,
                       padding: "10px 12px",
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
-                      gridColumn: "1 / -1",
                     }}
                   >
                     <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
@@ -2636,7 +2737,6 @@ export default function LeadDetailsClient({
                       borderRadius: 10,
                       padding: "10px 12px",
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
-                      gridColumn: "1 / -1",
                     }}
                   >
                     <div
@@ -2675,24 +2775,6 @@ export default function LeadDetailsClient({
                           overflow: "hidden",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr",
-                            gap: 0,
-                            background: "#f8fafc",
-                            borderBottom: "1px solid #e2e8f0",
-                            padding: "6px 10px",
-                            fontSize: 11,
-                            color: "#64748b",
-                            fontWeight: 700,
-                            textTransform: "uppercase",
-                            letterSpacing: 0.2,
-                          }}
-                        >
-                          <span>Employee Name</span>
-                        </div>
-
                         <div style={{ maxHeight: 170, overflowY: "auto" }}>
                           {getProjectTeamMembers().map((member, index) => (
                             <div
@@ -2721,6 +2803,83 @@ export default function LeadDetailsClient({
                     ) : (
                       <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
                         No team members assigned.
+                      </div>
+                    )}
+                  </section>
+
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Project Contacts
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#475569",
+                          fontWeight: 600,
+                          background: "#f1f5f9",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 999,
+                          padding: "2px 10px",
+                        }}
+                      >
+                        {getProjectContacts().length} Contact{getProjectContacts().length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+
+                    {getProjectContacts().length > 0 ? (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div style={{ maxHeight: 170, overflowY: "auto" }}>
+                          {getProjectContacts().map((contact, index) => (
+                            <div
+                              key={`${contact.ContactId ?? "contact"}-${index}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr",
+                                gap: 0,
+                                padding: "8px 10px",
+                                borderBottom:
+                                  index === getProjectContacts().length - 1
+                                    ? "none"
+                                    : "1px solid #f1f5f9",
+                                fontSize: 14,
+                                color: "#0f172a",
+                                alignItems: "center",
+                              }}
+                            >
+                              <span style={{ fontWeight: 500 }}>
+                                {toDisplayValue(contact.ContactName)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+                        No project contacts added.
                       </div>
                     )}
                   </section>
@@ -2826,9 +2985,10 @@ export default function LeadDetailsClient({
                     </button>
                   </section>
                 </div>
-              </div>
-            </div>
-          )}
+                </div>
+              </div>,
+              document.body
+            )}
 
           {showProjectForm && (
             <div style={{ ...modalOverlay, zIndex: 10002 }} onClick={() => setShowProjectForm(false)}>
@@ -2839,7 +2999,7 @@ export default function LeadDetailsClient({
                   maxHeight: "86vh",
                   overflowY: "auto",
                   borderRadius: 10,
-                  border: "1px solid #dbeafe",
+                  border: "1px solid rgba(31, 58, 104, 0.22)",
                   boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -3099,7 +3259,7 @@ export default function LeadDetailsClient({
                                 marginBottom: 0,
                                 marginTop: "2px",
                                 textAlign: "left",
-                                background: isSelected ? "#dbeafe" : "transparent",
+                                background: isSelected ? "rgba(31, 58, 104, 0.16)" : "transparent",
                                 color: "#0f172a",
                                 cursor: "pointer",
                                 transition: "background-color 0.15s ease",
@@ -3382,6 +3542,29 @@ export default function LeadDetailsClient({
                 <>
                   {/* FIRST ROW - 3 COLUMNS */}
                   <div style={formRow3}>
+                    <div style={fieldGroup}>
+                      <label>Project *</label>
+                      <select
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                        value={opportunityForm.projectId}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          handleOpportunityProjectChange(value ? Number(value) : "");
+                        }}
+                      >
+                        <option value="">-- Select Project --</option>
+                        {getActiveProjectsForOpportunity().map((project) => (
+                          <option key={project.ProjectId} value={project.ProjectId}>
+                            {project.ProjectName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div style={fieldGroup}>
                       <label>Service *</label>
                       <select
@@ -3713,7 +3896,7 @@ export default function LeadDetailsClient({
                                 }}
                               >
                                 <td style={oppTd}>{c.FullName || "—"}</td>
-                                <td style={{ ...oppTd, color: "#2563eb" }}>
+                                <td style={{ ...oppTd, color: "#1F3A68" }}>
                                   {c.WorkEmail || "—"}
                                 </td>
                                 <td style={oppTd}>{c.JobTitle || "—"}</td>
@@ -3731,7 +3914,7 @@ export default function LeadDetailsClient({
                 <>
                   <div
                     style={{
-                      background: "#3a77e3",
+                      background: "#F26522",
                       color: "#fff",
                       padding: "12px 16px",
                       fontWeight: 600,
@@ -4313,10 +4496,11 @@ const backBtnStyle: React.CSSProperties = {
   padding: "8px 12px",
   borderRadius: 8,
   border: "none",
-  background: "#3a77e3",
+  background: "#F26522",
   color: "#fff",
   fontWeight: 600,
   cursor: "pointer",
+  boxShadow: "0 4px 10px rgba(242, 101, 34, 0.25)",
 };
 
 const oppTh: React.CSSProperties = {
@@ -4340,6 +4524,6 @@ const dropdownItem: React.CSSProperties = {
   textAlign: "left",
   cursor: "pointer",
   borderRadius: "4px",
-  color: "#3a77e3",
+  color: "#F26522",
 };
 

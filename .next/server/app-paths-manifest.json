@@ -1,1 +1,13 @@
-{}
+{
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/dashboard/route": "app/api/dashboard/route.js",
+  "/api/employees/account/route": "app/api/employees/account/route.js",
+  "/webpage/page": "app/webpage/page.js",
+  "/api/employees/outreach-analytics/route": "app/api/employees/outreach-analytics/route.js",
+  "/api/masters/others/route": "app/api/masters/others/route.js",
+  "/api/employees/leads/[leadID]/route": "app/api/employees/leads/[leadID]/route.js",
+  "/api/employees/leads/[leadID]/projects/route": "app/api/employees/leads/[leadID]/projects/route.js",
+  "/api/employees/leads/[leadID]/opportunities/route": "app/api/employees/leads/[leadID]/opportunities/route.js",
+  "/api/masters/categories-with-subcategories/route": "app/api/masters/categories-with-subcategories/route.js",
+  "/api/employees/leads/[leadID]/opportunities/[OpportunityId]/contacts/route": "app/api/employees/leads/[leadID]/opportunities/[OpportunityId]/contacts/route.js"
+}

@@ -1,12 +1,24 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
 :root {
-    --bg: #f6f8fc;
+    --adroitent-orange: #F26522;
+    --adroitent-navy: #1F3A68;
+    --adroitent-deep-navy: #0F1F3D;
+    --adroitent-cyan: #12B7C9;
+    --warm-off-white: #F8F4EF;
+    --neutral-slate: #475569;
+    --bg: var(--warm-off-white);
     --card: #ffffff;
-    --accent: #2563eb;
+    --accent: var(--adroitent-orange);
     --danger: #dc2626;
-    --text: #0f172a;
-    --muted: #64748b;
-    --border: #e2e8f0;
-    --ring: rgba(37, 99, 235, 0.2);
+    --text: var(--adroitent-deep-navy);
+    --muted: var(--neutral-slate);
+    --border: rgba(31, 58, 104, 0.16);
+    --ring: rgba(242, 101, 34, 0.24);
+    --shadow-soft: 0 14px 34px rgba(15, 31, 61, 0.09);
+    --font-body: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: "Inter Display", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
 html,
@@ -18,7 +30,7 @@ body,
 
 body {
     margin: 0;
-    font-family: Inter, system-ui, Arial, sans-serif;
+    font-family: var(--font-body);
     background: var(--bg);
     color: var(--text);
     line-height: 1.45;
@@ -37,7 +49,7 @@ body {
     padding: 20px;
     border-radius: 12px;
     border: 1px solid var(--border);
-    box-shadow: 0 10px 24px rgba(15, 23, 42, .06);
+    box-shadow: var(--shadow-soft);
 }
 
 button {
@@ -56,15 +68,79 @@ textarea:focus-visible {
 input,
 select {
     padding: 10px 12px;
-    border: 1px solid #d5dce7;
+    border: 1px solid rgba(31, 58, 104, 0.18);
     border-radius: 8px;
     background: #fff;
+    color: var(--text);
+    font-family: var(--font-body);
 }
 
 textarea {
-    border: 1px solid #d5dce7;
+    border: 1px solid rgba(31, 58, 104, 0.18);
     border-radius: 8px;
     background: #fff;
+    color: var(--text);
+    font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4,
+.display-font {
+    font-family: var(--font-display);
+    color: var(--adroitent-navy);
+    letter-spacing: -0.02em;
+}
+
+code,
+pre,
+kbd,
+samp {
+    font-family: var(--font-mono);
+}
+
+.app-shell {
+    isolation: isolate;
+}
+
+.app-shell::before,
+.app-shell::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.app-shell::before {
+    opacity: 0.42;
+    background-image:
+        radial-gradient(circle at 18% 22%, rgba(18, 183, 201, 0.14) 0 2px, transparent 3px),
+        radial-gradient(circle at 72% 18%, rgba(242, 101, 34, 0.13) 0 2px, transparent 3px),
+        radial-gradient(circle at 84% 68%, rgba(31, 58, 104, 0.14) 0 2px, transparent 3px),
+        linear-gradient(115deg, transparent 0 18%, rgba(18, 183, 201, 0.11) 18.2%, transparent 18.6% 42%, rgba(31, 58, 104, 0.1) 42.2%, transparent 42.6% 72%, rgba(242, 101, 34, 0.1) 72.2%, transparent 72.6%),
+        linear-gradient(36deg, transparent 0 31%, rgba(31, 58, 104, 0.09) 31.2%, transparent 31.6% 64%, rgba(18, 183, 201, 0.1) 64.2%, transparent 64.6%);
+    background-size: 320px 260px, 360px 280px, 420px 340px, 520px 460px, 640px 520px;
+    animation: networkDrift 30s linear infinite;
+}
+
+.app-shell::after {
+    opacity: 0.42;
+    background-image:
+        linear-gradient(rgba(31, 58, 104, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 58, 104, 0.045) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(90deg, transparent, #000 12%, #000 86%, transparent);
+}
+
+@keyframes networkDrift {
+    from {
+        background-position: 0 0, 80px 40px, 20px 120px, 0 0, 160px 80px;
+    }
+    to {
+        background-position: 320px 260px, 440px 320px, 440px 460px, 520px 460px, 680px 540px;
+    }
 }
 
 .ai-sidebar-btn > span:first-child {
@@ -90,33 +166,43 @@ textarea {
 
 .sidebar-toggle-btn:hover {
     filter: brightness(1.03);
-    box-shadow: 0 10px 22px rgba(249, 115, 22, 0.32) !important;
-    transform: translateY(-50%) scale(1.03) !important;
+    box-shadow: 0 10px 22px rgba(242, 101, 34, 0.32) !important;
+    transform: translateY(0) scale(1.03) !important;
 }
 
 .sidebar-toggle-btn:active {
-    transform: translateY(-50%) scale(0.97) !important;
-    box-shadow: 0 5px 12px rgba(249, 115, 22, 0.24) !important;
+    transform: translateY(0) scale(0.97) !important;
+    box-shadow: 0 5px 12px rgba(242, 101, 34, 0.24) !important;
 }
 
 .sidebar-toggle-btn:focus-visible {
     outline: none;
     box-shadow:
         0 0 0 3px rgba(255, 255, 255, 0.88),
-        0 0 0 6px rgba(249, 115, 22, 0.36),
-        0 8px 18px rgba(249, 115, 22, 0.28) !important;
+        0 0 0 6px rgba(242, 101, 34, 0.36),
+        0 8px 18px rgba(242, 101, 34, 0.28) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
 }
 
 @media (max-width: 1024px) {
     .sidebar-toggle-btn {
-        left: -12px !important;
+        left: -24px !important;
     }
 }
 
 @media (max-width: 640px) {
     .sidebar-toggle-btn {
-        left: -10px !important;
-        width: 34px !important;
-        height: 34px !important;
+        left: -20px !important;
+        width: 40px !important;
+        height: 40px !important;
     }
 }

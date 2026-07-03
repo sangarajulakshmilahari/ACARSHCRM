@@ -393,12 +393,13 @@ export default function WebPageClient(): JSX.Element {
 
     return (
         <div
+            className="app-shell"
             style={{
                 minHeight: "100vh",
                 display: "flex",
-                fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto",
+                fontFamily: "var(--font-body)",
                 position: "relative",
-                background: "#f6f8fc",
+                background: "var(--warm-off-white)",
                 overflow: "hidden",
             }}
         >
@@ -408,20 +409,20 @@ export default function WebPageClient(): JSX.Element {
                     width: sidebarWidth,
                     minWidth: sidebarWidth,
                     height: "100vh",
-                    borderRight: "1px solid #e7edf6",
+                    borderRight: "1px solid rgba(248, 244, 239, 0.12)",
                     paddingTop: sidebarCollapsed ? 16 : 18,
                     paddingBottom: 18,
                     paddingLeft: sidebarCollapsed ? 8 : 18,
                     paddingRight: sidebarCollapsed ? 8 : 18,
-                    background: "#fff",
-                    boxShadow: "6px 0 18px rgba(15, 23, 42, 0.04)",
+                    background: "linear-gradient(180deg, #0F1F3D 0%, #1F3A68 100%)",
+                    boxShadow: "8px 0 24px rgba(15, 31, 61, 0.18)",
                     overflowY: "auto",
                     overflowX: "hidden",
                     transition: "width 0.25s ease, padding 0.25s ease",
                     boxSizing: "border-box",
                     position: "fixed",
                     top: 0,
-                    zIndex: 1,
+                    zIndex: 2,
                 }}
             >
                 {/* LOGO — visible ONLY when NOT collapsed */}
@@ -438,25 +439,25 @@ export default function WebPageClient(): JSX.Element {
                             <div
                                 style={{
                                     width: 220,
-                                    background: "#fff",
-                                    padding: 14,
-                                    borderRadius: 10,
-                                    border: "1px solid #eef2f7",
-                                    boxShadow: "0 6px 16px rgba(15, 23, 42, 0.05)",
+                                    background: "transparent",
+                                    padding: 0,
+                                    borderRadius: 0,
+                                    border: "none",
+                                    boxShadow: "none",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
                                     overflow: "hidden",
                                 }}
-                            >
+                             >
                                 <Image
                                     src="/logo1.png"
                                     alt="Logo"
                                     width={260}
                                     height={120}
                                     style={{
-                                        width: "90%",
-                                        height: "75%",
+                                        width: "86%",
+                                        height: "auto",
                                         objectFit: "contain",
                                         display: "block",
                                     }}
@@ -467,7 +468,7 @@ export default function WebPageClient(): JSX.Element {
                         <div
                             style={{
                                 height: 0,
-                                background: "#efefef",
+                                background: "rgba(248, 244, 239, 0.16)",
                                 margin: "10px 0 14px 0",
                             }}
                         />
@@ -513,17 +514,19 @@ export default function WebPageClient(): JSX.Element {
                                             padding: sidebarCollapsed ? "10px 6px" : "10px 14px",
                                             borderRadius: 10,
                                             border: active
-                                                ? "1px solid #2459d3"
-                                                : "1px solid #e3e9f3",
+                                                ? "1px solid #F26522"
+                                                : "1px solid rgba(248, 244, 239, 0.18)",
                                             cursor: "pointer",
-                                            background: active ? "#2459d3" : "#f6f9ff",
-                                            color: active ? "#fff" : "#111",
+                                            background: active
+                                                ? "linear-gradient(135deg, #F26522 0%, #d95317 100%)"
+                                                : "rgba(248, 244, 239, 0.08)",
+                                            color: "#fff",
                                             minHeight: 44,
                                             justifyContent: sidebarCollapsed
                                                 ? "center"
                                                 : "flex-start",
                                             boxShadow: active
-                                                ? "0 8px 20px rgba(36, 89, 211, 0.2)"
+                                                ? "0 10px 22px rgba(242, 101, 34, 0.26)"
                                                 : "none",
                                             transition: "background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease",
                                         }}
@@ -546,8 +549,8 @@ export default function WebPageClient(): JSX.Element {
                                                 style={{
                                                     flex: 1,
                                                     fontSize: 14,
-                                                    fontWeight: 500,
-                                                    color: active ? "#fff" : "#222",
+                                                    fontWeight: 600,
+                                                    color: active ? "#fff" : "rgba(248, 244, 239, 0.88)",
                                                 }}
                                             >
                                                 {label}
@@ -570,10 +573,12 @@ export default function WebPageClient(): JSX.Element {
                 gap: sidebarCollapsed ? 0 : 12,
                 padding: sidebarCollapsed ? "10px 6px" : "10px 14px",
                 borderRadius: 8,
-                border: chatOpen ? "1px solid #f56c00" : "1px solid #dbe4ff",
+                border: chatOpen ? "1px solid #12B7C9" : "1px solid rgba(18, 183, 201, 0.28)",
                 cursor: "pointer",
-                background: chatOpen ? "#f56c00" : "#eef2ff",
-                color: chatOpen ? "#fff" : "#4338ca",
+                background: chatOpen
+                  ? "linear-gradient(135deg, #12B7C9 0%, #0d94a4 100%)"
+                  : "rgba(18, 183, 201, 0.12)",
+                color: chatOpen ? "#fff" : "#D9FBFF",
                 minHeight: 44,
                 justifyContent: sidebarCollapsed ? "center" : "flex-start",
                 fontWeight: 600,
@@ -591,7 +596,7 @@ export default function WebPageClient(): JSX.Element {
                 </nav>
 
                 {!sidebarCollapsed && (
-                    <div style={{ marginTop: 20, fontSize: 13, color: "#666" }}></div>
+                    <div style={{ marginTop: 20, fontSize: 13, color: "rgba(248, 244, 239, 0.62)" }}></div>
                 )}
             </aside>
 
@@ -603,26 +608,28 @@ export default function WebPageClient(): JSX.Element {
                     height: "100vh",
                     overflow: "hidden",
                     padding: 0,
-                    background: "#f8fafc",
+                    background: "rgba(248, 244, 239, 0.78)",
                     transition: "all 0.3s ease",
+                    position: "relative",
+                    zIndex: 4,
                 }}
             >
                 {/* BLUE TOP BAR */}
                 <div
                     style={{
                         height: 60,
-                        backgroundColor: "#3a77e3",
+                        backgroundColor: "#1F3A68",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "space-between",
                         color: "white",
-                        boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+                        boxShadow: "0 8px 22px rgba(15, 31, 61, 0.24)",
                         boxSizing: "border-box",
                         position: "fixed",
                         top: 0,
                         left: sidebarWidth,
                         width: `calc(100% - ${sidebarWidth}px)`,
-                        zIndex: 2,
+                        zIndex: 5,
                     }}
                 >
                     {/* Sidebar toggle */}
@@ -634,19 +641,19 @@ export default function WebPageClient(): JSX.Element {
                         onClick={toggleSidebar}
                         style={{
                             position: "absolute",
-                            left: "-14px",
-                            top: "50%",
-                            transform: "translateY(-50%)",
-                            width: "clamp(34px, 2.6vw, 40px)",
-                            height: "clamp(34px, 2.6vw, 40px)",
+                            left: "-24px",
+                            top: "10px",
+                            transform: "translateY(0)",
+                            width: 40,
+                            height: 40,
                             borderRadius: "999px",
-                            background: "linear-gradient(180deg, #ff922b 0%, #f97316 100%)",
+                            background: "linear-gradient(180deg, #F26522 0%, #d95317 100%)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            boxShadow: "0 8px 18px rgba(249, 115, 22, 0.28)",
-                            border: "1px solid rgba(255,255,255,0.5)",
-                            zIndex: 3,
+                            boxShadow: "0 8px 18px rgba(242, 101, 34, 0.32)",
+                            border: "1px solid rgba(255,255,255,0.62)",
+                            zIndex: 6,
                             padding: 0,
                             lineHeight: 1,
                             transition:
@@ -655,7 +662,7 @@ export default function WebPageClient(): JSX.Element {
                     >
                         <span
                             style={{
-                                fontSize: 18,
+                                fontSize: 16,
                                 lineHeight: 1,
                                 color: "white",
                                 userSelect: "none",
@@ -674,7 +681,8 @@ export default function WebPageClient(): JSX.Element {
                             fontSize: 32,
                             flex: 1,
                             paddingLeft: 30,
-                            letterSpacing: 0.8,
+                            letterSpacing: "-0.02em",
+                            fontFamily: "var(--font-display)",
                         }}
                     >
                         ACARSH
@@ -705,12 +713,12 @@ export default function WebPageClient(): JSX.Element {
                                 padding: "7px 12px",
                                 borderRadius: 8,
                                 border: "none",
-                                backgroundColor: "#f56c00",
+                                backgroundColor: "#F26522",
                                 color: "white",
                                 cursor: "pointer",
                                 fontWeight: 600,
                                 fontSize: 13,
-                                boxShadow: "0 6px 14px rgba(245,108,0,0.3)",
+                                boxShadow: "0 6px 14px rgba(242,101,34,0.3)",
                             }}
                         >
                             Logout
@@ -727,6 +735,8 @@ export default function WebPageClient(): JSX.Element {
                         boxSizing: "border-box",
                         overflowY: isListViewportTab ? "hidden" : "auto",
                         overflowX: "hidden",
+                        position: "relative",
+                        zIndex: 1,
                     }}
                 >
                     <div

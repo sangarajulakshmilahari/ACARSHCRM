@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
         ON latestActivity.StatusId = las.StatusId
       WHERE at.Name = 'Prospect'
       ${isAdmin ? "" : "AND l.OwnerId = ?"}
+      ORDER BY l.CreatedOn DESC
     `;
 
     const [rows]: any = await pool.query(

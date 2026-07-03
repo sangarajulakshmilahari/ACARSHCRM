@@ -15,6 +15,7 @@ export async function POST(
   }
 
   const {
+    projectId,
     serviceId,
     statusId,
     probabilityId,
@@ -25,6 +26,7 @@ export async function POST(
   } = await req.json();
 
   if (
+    !projectId ||
     !serviceId ||
     !statusId ||
     !probabilityId ||
@@ -39,10 +41,37 @@ export async function POST(
 
   const pool = await getPool();
   let conn: any;
+  const normalizedProjectId = Number(projectId);
+
+  if (isNaN(normalizedProjectId)) {
+    return NextResponse.json(
+      { error: "Invalid ProjectId" },
+      { status: 400 }
+    );
+  }
 
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
+
+    const [projectRows]: any = await conn.query(
+      `
+      SELECT ProjectId
+      FROM projects
+      WHERE ProjectId = ?
+        AND CustomerId = ?
+        AND COALESCE(IsHidden, 0) = 0
+      `,
+      [normalizedProjectId, leadId]
+    );
+
+    if (!projectRows.length) {
+      await conn.rollback();
+      return NextResponse.json(
+        { error: "Selected project does not belong to this customer" },
+        { status: 400 }
+      );
+    }
 
     /* 1 INSERT OPPORTUNITY */
     const [insertResult]: any = await conn.query(
@@ -50,6 +79,7 @@ export async function POST(
       INSERT INTO Opportunities
       (
         LeadId,
+        ProjectId,
         ServiceId,
         ProbabilityId,
         EngagementId,
@@ -57,9 +87,9 @@ export async function POST(
         CreatedOn,
         IsDeleted
       )
-      VALUES (?, ?, ?, ?, ?, NOW(), 0)
+      VALUES (?, ?, ?, ?, ?, ?, NOW(), 0)
       `,
-      [leadId, serviceId, probabilityId, engagementId, statusId]
+      [leadId, normalizedProjectId, serviceId, probabilityId, engagementId, statusId]
     );
 
     const OpportunityId = insertResult.insertId;
@@ -108,7 +138,7 @@ export async function POST(
     for (const subCategoryId of finalTechnologyIds) {
       await conn.query(
         `
-        INSERT INTO Opportunity_Categories
+        INSERT INTO Opportunity_categories
         (OpportunityId, SubCategoryId)
         VALUES (?, ?)
         `,
@@ -147,6 +177,7 @@ export async function PUT(
 ) {
   const {
     OpportunityId,
+    projectId,
     serviceId,
     statusId,
     probabilityId,
@@ -158,6 +189,7 @@ export async function PUT(
 
   if (
     !OpportunityId ||
+    !projectId ||
     !serviceId ||
     !statusId ||
     !probabilityId ||
@@ -172,30 +204,72 @@ export async function PUT(
 
   const pool = await getPool();
   let conn: any;
+  const leadId = Number(params.leadID);
+  const normalizedProjectId = Number(projectId);
+
+  if (isNaN(leadId)) {
+    return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
+  }
+
+  if (isNaN(normalizedProjectId)) {
+    return NextResponse.json(
+      { error: "Invalid ProjectId" },
+      { status: 400 }
+    );
+  }
 
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
+
+    const [projectRows]: any = await conn.query(
+      `
+      SELECT ProjectId
+      FROM Projects
+      WHERE ProjectId = ?
+        AND CustomerId = ?
+        AND COALESCE(IsHidden, 0) = 0
+      `,
+      [normalizedProjectId, leadId]
+    );
+
+    if (!projectRows.length) {
+      await conn.rollback();
+      return NextResponse.json(
+        { error: "Selected project does not belong to this customer" },
+        { status: 400 }
+      );
+    }
 
     /* 1 UPDATE OPPORTUNITY */
     await conn.query(
       `
       UPDATE Opportunities
       SET
+        ProjectId = ?,
         ServiceId = ?,
         ProbabilityId = ?,
         EngagementId = ?,
         Opportunity_StatusId = ?,
         ModifiedOn = NOW()
       WHERE OpportunityId = ?
+        AND LeadId = ?
       `,
-      [serviceId, probabilityId, engagementId, statusId, OpportunityId]
+      [
+        normalizedProjectId,
+        serviceId,
+        probabilityId,
+        engagementId,
+        statusId,
+        OpportunityId,
+        leadId,
+      ]
     );
 
     /* 2 RESET TECHNOLOGIES */
     await conn.query(
       `
-      DELETE FROM Opportunity_Categories
+      DELETE FROM Opportunity_categories
       WHERE OpportunityId = ?
       `,
       [OpportunityId]
@@ -245,7 +319,7 @@ export async function PUT(
     for (const subCategoryId of finalTechnologyIds) {
       await conn.query(
         `
-        INSERT INTO Opportunity_Categories
+        INSERT INTO Opportunity_categories
         (OpportunityId, SubCategoryId)
         VALUES (?, ?)
         `,
@@ -299,6 +373,8 @@ export async function GET(
       `
       SELECT
         o.OpportunityId,
+        o.ProjectId,
+        pr.ProjectName,
         o.ServiceId,
         o.ProbabilityId,
         o.Opportunity_StatusId AS StatusId,
@@ -312,15 +388,18 @@ export async function GET(
         GROUP_CONCAT(sc.SubCategoryName SEPARATOR ', ') AS Technology,
         GROUP_CONCAT(sc.SubCategoryId SEPARATOR ',') AS TechnologyIds
       FROM Opportunities o
+      LEFT JOIN projects pr ON o.ProjectId = pr.ProjectId
       LEFT JOIN Services s ON o.ServiceId = s.ServiceId
       LEFT JOIN Probability p ON o.ProbabilityId = p.ProbabilityId
       LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId
       LEFT JOIN Engagement_Models em ON o.EngagementId = em.EngagementId
-      LEFT JOIN Opportunity_Categories oc ON o.OpportunityId = oc.OpportunityId
+      LEFT JOIN Opportunity_categories oc ON o.OpportunityId = oc.OpportunityId
       LEFT JOIN SubCategory sc ON oc.SubCategoryId = sc.SubCategoryId
       WHERE o.OpportunityId = ?
       GROUP BY
         o.OpportunityId,
+        o.ProjectId,
+        pr.ProjectName,
         o.ServiceId,
         o.ProbabilityId,
         o.Opportunity_StatusId,
@@ -358,6 +437,8 @@ function getOpportunitySelectQuery() {
   return `
     SELECT
       o.OpportunityId,
+      o.ProjectId,
+      pr.ProjectName,
 
       -- IDS
       o.ServiceId,
@@ -387,11 +468,12 @@ function getOpportunitySelectQuery() {
 
       o.CreatedOn AS CreatedDate
     FROM Opportunities o
+    LEFT JOIN projects pr ON o.ProjectId = pr.ProjectId
     LEFT JOIN Services s ON o.ServiceId = s.ServiceId
     LEFT JOIN Probability p ON o.ProbabilityId = p.ProbabilityId
     LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId
     LEFT JOIN Engagement_Models em ON o.EngagementId = em.EngagementId
-    LEFT JOIN Opportunity_Categories ocg ON o.OpportunityId = ocg.OpportunityId
+    LEFT JOIN Opportunity_categories ocg ON o.OpportunityId = ocg.OpportunityId
     LEFT JOIN SubCategory sc ON ocg.SubCategoryId = sc.SubCategoryId
     LEFT JOIN OpportunityContacts oc
       ON o.OpportunityId = oc.OpportunityId
@@ -399,6 +481,8 @@ function getOpportunitySelectQuery() {
     WHERE o.OpportunityId = ?
     GROUP BY
       o.OpportunityId,
+      o.ProjectId,
+      pr.ProjectName,
       o.ServiceId,
       o.ProbabilityId,
       o.Opportunity_StatusId,

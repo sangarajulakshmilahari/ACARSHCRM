@@ -18,7 +18,7 @@ type FunnelMetrics = {
 };
 
 export default function DashboardPage() {
-  const chartPalette = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#0ea5e9"];
+  const chartPalette = ["#1F3A68", "#F26522", "#12B7C9", "#0F1F3D", "#475569", "#9B3F14"];
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState<number>(0);
   const [statusCounts, setStatusCounts] = useState<Record<number, number>>({});
@@ -181,7 +181,7 @@ export default function DashboardPage() {
         count: leads,
         width: leadWidth,
         icon: "fa-layer-group",
-        color: "#6366f1",
+        color: "#1F3A68",
         conversion: null as number | null,
       },
       {
@@ -190,7 +190,7 @@ export default function DashboardPage() {
         count: prospects,
         width: prospectWidth,
         icon: "fa-user-check",
-        color: "#14b8a6",
+        color: "#F26522",
         conversion: leadToProspect,
       },
       {
@@ -199,7 +199,7 @@ export default function DashboardPage() {
         count: accounts,
         width: accountWidth,
         icon: "fa-building",
-        color: "#f59e0b",
+        color: "#12B7C9",
         conversion: prospectToAccount,
       },
     ];
@@ -228,7 +228,7 @@ export default function DashboardPage() {
         datasets: [
           {
             data: [accepted, pending],
-            backgroundColor: ["#14b8a6", "#94a3b8"],
+            backgroundColor: ["#12B7C9", "#94a3b8"],
             borderColor: isDarkTheme ? "#0f172a" : "#ffffff",
             borderWidth: 4,
             hoverOffset: 6,
@@ -275,7 +275,7 @@ export default function DashboardPage() {
               outreachAnalytics.totalLinkedInRequestsAccepted,
               outreachAnalytics.totalEmailsSent,
             ],
-            backgroundColor: ["#6366f1", "#14b8a6", "#f59e0b"],
+            backgroundColor: ["#1F3A68", "#12B7C9", "#F26522"],
             borderRadius: 8,
             borderSkipped: false,
           },
@@ -614,25 +614,64 @@ export default function DashboardPage() {
       <style jsx>{`
         .dashboard-container {
           padding: 24px;
-          background: #f5f7fb;
+          background: rgba(248, 244, 239, 0.72);
           min-height: 100vh;
         }
         .dashboard-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          background: #fff;
+          background:
+            linear-gradient(120deg, #ffffff 0%, rgba(248, 244, 239, 0.92) 48%, rgba(255, 246, 241, 0.96) 100%);
+          background-size: 180% 180%;
           padding: 10px 18px;
           border-radius: 14px;
-          border: 1px solid #e6ebf4;
-          box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+          border: 1px solid rgba(31, 58, 104, 0.14);
+          box-shadow: 0 12px 26px rgba(15, 31, 61, 0.08);
+          overflow: hidden;
+          position: relative;
+          isolation: isolate;
+          animation: dashboardBreath 12s ease-in-out infinite alternate;
+        }
+        .dashboard-header::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          opacity: 0.62;
+          background:
+            radial-gradient(circle at 18% 50%, rgba(242, 101, 34, 0.08), transparent 28%),
+            radial-gradient(circle at 84% 42%, rgba(31, 58, 104, 0.055), transparent 30%);
+          animation: dashboardBreathGlow 12s ease-in-out infinite alternate;
+        }
+        .dashboard-header > * {
+          position: relative;
+          z-index: 1;
+        }
+        @keyframes dashboardBreath {
+          from {
+            background-position: 0% 50%;
+          }
+          to {
+            background-position: 100% 50%;
+          }
+        }
+        @keyframes dashboardBreathGlow {
+          from {
+            opacity: 0.42;
+            transform: scale(1);
+          }
+          to {
+            opacity: 0.72;
+            transform: scale(1.03);
+          }
         }
         .total-count {
-          background: #eef2ff;
-          color: #4338ca;
+          background: rgba(242, 101, 34, 0.1);
+          color: #F26522;
           padding: 10px 16px;
           border-radius: 999px;
-          border: 1px solid #e0e7ff;
+          border: 1px solid rgba(242, 101, 34, 0.22);
           font-weight: 600;
           font-size: 13px;
         }
@@ -648,8 +687,8 @@ export default function DashboardPage() {
           min-height: 120px;
           padding: 14px 12px;
           border-radius: 12px;
-          border: 1px solid #e7ecf5;
-          box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+          border: 1px solid rgba(31, 58, 104, 0.14);
+          box-shadow: 0 10px 22px rgba(15, 31, 61, 0.06);
           text-align: center;
           position: relative;
           overflow: hidden;
@@ -657,7 +696,7 @@ export default function DashboardPage() {
         }
         .status-card:hover {
           transform: translateY(-2px);
-          box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+          box-shadow: 0 14px 28px rgba(15, 31, 61, 0.1);
         }
         .status-card::before {
           content: "";
@@ -669,16 +708,16 @@ export default function DashboardPage() {
           border-radius: 14px 14px 0 0;
         }
         .new::before {
-          background: #28a745;
+          background: #12B7C9;
         }
         .contacted::before {
-          background: #17a2b8;
+          background: #1F3A68;
         }
         .followup::before {
-          background: #ffc107;
+          background: #F26522;
         }
         .qualified::before {
-          background: #007bff;
+          background: #0F1F3D;
         }
         .unqualified::before {
           background: #6c757d;
@@ -687,7 +726,7 @@ export default function DashboardPage() {
           background: #dc3545;
         }
         .converted::before {
-          background: #20c997;
+          background: #12B7C9;
         }
 
         .status-icon {
@@ -726,7 +765,7 @@ export default function DashboardPage() {
         }
         .funnel-card {
           margin-bottom: 0;
-          background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+          background: linear-gradient(180deg, #ffffff 0%, #fbf8f4 100%);
         }
         .monthly-half .chart-container {
           height: 420px;
@@ -738,11 +777,11 @@ export default function DashboardPage() {
           margin-bottom: 14px;
         }
         .funnel-kpi-pill {
-          border: 1px solid #e3e8f3;
+          border: 1px solid rgba(31, 58, 104, 0.14);
           border-radius: 14px;
           padding: 10px 12px;
           background: #fff;
-          box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+          box-shadow: 0 8px 16px rgba(15, 31, 61, 0.06);
         }
         .funnel-kpi-pill span {
           display: block;
@@ -753,12 +792,12 @@ export default function DashboardPage() {
         }
         .funnel-kpi-pill strong {
           font-size: 18px;
-          color: #0f172a;
+          color: #0F1F3D;
           line-height: 1;
         }
         .funnel-kpi-pill.accent {
-          background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
-          border-color: #e0e7ff;
+          background: linear-gradient(135deg, #fff 0%, rgba(242, 101, 34, 0.09) 100%);
+          border-color: rgba(242, 101, 34, 0.2);
         }
         .funnel-shell {
           display: flex;
@@ -770,7 +809,7 @@ export default function DashboardPage() {
         .funnel-stage {
           border: 1px solid;
           border-radius: 16px;
-          box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+          box-shadow: 0 12px 24px rgba(15, 31, 61, 0.14);
           transition: transform 0.22s ease, box-shadow 0.22s ease;
           position: relative;
           overflow: hidden;
@@ -788,7 +827,7 @@ export default function DashboardPage() {
         }
         .funnel-stage:hover {
           transform: translateY(-2px);
-          box-shadow: 0 16px 30px rgba(15, 23, 42, 0.18);
+          box-shadow: 0 16px 30px rgba(15, 31, 61, 0.18);
         }
         .funnel-stage-inner {
           display: flex;
@@ -844,10 +883,10 @@ export default function DashboardPage() {
           align-items: center;
           gap: 8px;
           font-size: 12px;
-          color: #7c3aed;
+          color: #F26522;
           font-weight: 600;
-          background: rgba(99, 102, 241, 0.09);
-          border: 1px solid rgba(99, 102, 241, 0.24);
+          background: rgba(242, 101, 34, 0.09);
+          border: 1px solid rgba(242, 101, 34, 0.24);
           border-radius: 999px;
           padding: 5px 11px;
         }
@@ -855,13 +894,13 @@ export default function DashboardPage() {
           background: #fff;
           padding: 20px;
           border-radius: 14px;
-          border: 1px solid #e6ebf4;
-          box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+          border: 1px solid rgba(31, 58, 104, 0.14);
+          box-shadow: 0 12px 26px rgba(15, 31, 61, 0.08);
           transition: box-shadow 0.2s ease, transform 0.2s ease;
         }
         .chart-card:hover {
           transform: translateY(-1px);
-          box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
+          box-shadow: 0 16px 30px rgba(15, 31, 61, 0.1);
         }
         .chart-card.full {
           margin-top: 20px;
@@ -880,7 +919,7 @@ export default function DashboardPage() {
           font-size: 16px;
           font-weight: 600;
           letter-spacing: 0.1px;
-          color: #0f172a;
+          color: #0F1F3D;
         }
         .chart-subtitle {
           margin-top: 0;
@@ -894,7 +933,7 @@ export default function DashboardPage() {
         }
 
         .outreach-experiment {
-          background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+          background: linear-gradient(180deg, #ffffff 0%, #fbf8f4 100%);
         }
         .outreach-kpis {
           display: grid;
@@ -922,17 +961,17 @@ export default function DashboardPage() {
         }
         .kpi strong {
           font-size: 24px;
-          color: #0f172a;
+          color: #0F1F3D;
           line-height: 1;
         }
         .kpi-sent {
-          background: rgba(99, 102, 241, 0.1);
+          background: rgba(31, 58, 104, 0.1);
         }
         .kpi-accepted {
-          background: rgba(20, 184, 166, 0.12);
+          background: rgba(18, 183, 201, 0.12);
         }
         .kpi-emails {
-          background: rgba(245, 158, 11, 0.16);
+          background: rgba(242, 101, 34, 0.14);
         }
         .kpi-eff {
           background: rgba(168, 85, 247, 0.1);
@@ -953,7 +992,7 @@ export default function DashboardPage() {
           color: #334155;
         }
         .conversion-head strong {
-          color: #4f46e5;
+          color: #F26522;
           font-size: 14px;
         }
         .track {
@@ -964,7 +1003,7 @@ export default function DashboardPage() {
         }
         .fill {
           height: 100%;
-          background: linear-gradient(90deg, #6366f1 0%, #14b8a6 60%, #f59e0b 100%);
+          background: linear-gradient(90deg, #1F3A68 0%, #12B7C9 58%, #F26522 100%);
           border-radius: 999px;
           transition: width 0.3s ease;
         }
@@ -982,7 +1021,7 @@ export default function DashboardPage() {
         .mini-chart h4 {
           margin: 0 0 8px;
           font-size: 13px;
-          color: #0f172a;
+          color: #0F1F3D;
         }
         .mini-canvas {
           height: 200px;
@@ -1037,16 +1076,16 @@ export default function DashboardPage() {
         }
 
         .new .status-icon {
-          color: #28a745;
+          color: #12B7C9;
         }
         .contacted .status-icon {
-          color: #17a2b8;
+          color: #1F3A68;
         }
         .followup .status-icon {
-          color: #ffc107;
+          color: #F26522;
         }
         .qualified .status-icon {
-          color: #6366f1;
+          color: #0F1F3D;
         }
         .unqualified .status-icon {
           color: #6c757d;
@@ -1055,7 +1094,7 @@ export default function DashboardPage() {
           color: #dc3545;
         }
         .converted .status-icon {
-          color: #20c997;
+          color: #12B7C9;
         }
 
         @media (prefers-color-scheme: dark) {

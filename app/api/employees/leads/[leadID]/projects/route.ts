@@ -45,7 +45,7 @@ export async function GET(
           p.StartDate,
           p.EndDate,
           CASE WHEN COALESCE(p.IsHidden, 0) = 1 THEN 'Hidden' ELSE 'Active' END AS Status
-        FROM projects p
+        FROM Projects p
         WHERE p.CustomerId = ?
         ${!projectId && !includeHidden && statusParam === "all" ? "AND COALESCE(p.IsHidden, 0) = 0" : ""}
         ${!projectId && statusParam === "active" ? "AND COALESCE(p.IsHidden, 0) = 0" : ""}
@@ -67,21 +67,34 @@ export async function GET(
         const [teamMembers]: any = await conn.query(
           `
           SELECT DISTINCT
-            e.id AS EmployeeId,
-            e.name AS EmployeeName
-          FROM Customers c
+            pr.EmployeeId AS EmployeeId,
+            COALESCE(e.name, pr.EmployeeId) AS EmployeeName
+          FROM ProjectResources pr
           INNER JOIN Projects p
-            ON p.CustomerId = c.CustomerId
-          INNER JOIN aaram_project_map app
-            ON p.ProjectId = app.aaram_project_id
-          INNER JOIN aaram_db.employee_project_assignment epa
-            ON epa.project_id = app.aaram_project_id
-          INNER JOIN aaram_db.employee e
-            ON e.id = epa.employee_id
+            ON p.ProjectId = pr.ProjectId
+          LEFT JOIN aaram_db.employee e
+            ON e.employee_id = pr.EmployeeId
+           AND e.active = 1
           WHERE p.CustomerId = ?
-            AND p.ProjectId = ?
-            AND e.active = 1
-          ORDER BY e.name ASC
+            AND pr.ProjectId = ?
+          ORDER BY COALESCE(e.name, pr.EmployeeId) ASC
+          `,
+          [leadId, projectId]
+        );
+
+        const [projectContacts]: any = await conn.query(
+          `
+          SELECT
+            pc.ContactId,
+            pc.ProjectId,
+            pc.ContactName,
+            pc.ContactTypeId
+          FROM ProjectContacts pc
+          INNER JOIN Projects p
+            ON p.ProjectId = pc.ProjectId
+          WHERE p.CustomerId = ?
+            AND pc.ProjectId = ?
+          ORDER BY pc.ContactName ASC
           `,
           [leadId, projectId]
         );
@@ -89,6 +102,7 @@ export async function GET(
         return NextResponse.json({
           ...project,
           TeamMembers: Array.isArray(teamMembers) ? teamMembers : [],
+          ProjectContacts: Array.isArray(projectContacts) ? projectContacts : [],
         });
       }
 
