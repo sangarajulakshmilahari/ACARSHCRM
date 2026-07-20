@@ -23,12 +23,12 @@ export async function POST(
     technologies,
     otherTechnologies,
     hasOtherTechnology,
+    isComplete,
   } = await req.json();
 
   if (
-    !projectId ||
-    !serviceId ||
     !statusId ||
+    !serviceId ||
     !probabilityId ||
     !engagementId ||
     !Array.isArray(technologies)
@@ -41,9 +41,12 @@ export async function POST(
 
   const pool = await getPool();
   let conn: any;
-  const normalizedProjectId = Number(projectId);
+  const normalizedProjectId =
+    projectId !== undefined && projectId !== null && projectId !== ""
+      ? Number(projectId)
+      : null;
 
-  if (isNaN(normalizedProjectId)) {
+  if (normalizedProjectId !== null && Number.isNaN(normalizedProjectId)) {
     return NextResponse.json(
       { error: "Invalid ProjectId" },
       { status: 400 }
@@ -54,23 +57,25 @@ export async function POST(
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const [projectRows]: any = await conn.query(
-      `
-      SELECT ProjectId
-      FROM projects
-      WHERE ProjectId = ?
-        AND CustomerId = ?
-        AND COALESCE(IsHidden, 0) = 0
-      `,
-      [normalizedProjectId, leadId]
-    );
-
-    if (!projectRows.length) {
-      await conn.rollback();
-      return NextResponse.json(
-        { error: "Selected project does not belong to this customer" },
-        { status: 400 }
+    if (normalizedProjectId !== null) {
+      const [projectRows]: any = await conn.query(
+        `
+        SELECT ProjectId
+        FROM projects
+        WHERE ProjectId = ?
+          AND CustomerId = ?
+          AND COALESCE(IsHidden, 0) = 0
+        `,
+        [normalizedProjectId, leadId]
       );
+
+      if (!projectRows.length) {
+        await conn.rollback();
+        return NextResponse.json(
+          { error: "Selected project does not belong to this customer" },
+          { status: 400 }
+        );
+      }
     }
 
     /* 1 INSERT OPPORTUNITY */
@@ -84,12 +89,21 @@ export async function POST(
         ProbabilityId,
         EngagementId,
         Opportunity_StatusId,
+        IsCompleted,
         CreatedOn,
         IsDeleted
       )
-      VALUES (?, ?, ?, ?, ?, ?, NOW(), 0)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 0)
       `,
-      [leadId, normalizedProjectId, serviceId, probabilityId, engagementId, statusId]
+      [
+        leadId,
+        normalizedProjectId,
+        serviceId,
+        probabilityId,
+        engagementId,
+        statusId,
+        Number(Boolean(isComplete)),
+      ]
     );
 
     const OpportunityId = insertResult.insertId;
@@ -185,11 +199,11 @@ export async function PUT(
     technologies,
     otherTechnologies,
     hasOtherTechnology,
+    isComplete,
   } = await req.json();
 
   if (
     !OpportunityId ||
-    !projectId ||
     !serviceId ||
     !statusId ||
     !probabilityId ||
@@ -205,66 +219,70 @@ export async function PUT(
   const pool = await getPool();
   let conn: any;
   const leadId = Number(params.leadID);
-  const normalizedProjectId = Number(projectId);
+  const normalizedProjectId =
+    projectId !== undefined && projectId !== null && projectId !== ""
+      ? Number(projectId)
+      : null;
 
-  if (isNaN(leadId)) {
-    return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
-  }
-
-  if (isNaN(normalizedProjectId)) {
+  if (normalizedProjectId !== null && Number.isNaN(normalizedProjectId)) {
     return NextResponse.json(
       { error: "Invalid ProjectId" },
       { status: 400 }
     );
   }
 
+  if (isNaN(leadId)) {
+    return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
+  }
+
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const [projectRows]: any = await conn.query(
+    const [existingRows]: any = await conn.query(
       `
-      SELECT ProjectId
-      FROM Projects
-      WHERE ProjectId = ?
-        AND CustomerId = ?
-        AND COALESCE(IsHidden, 0) = 0
+      SELECT OpportunityId, ProjectId
+      FROM Opportunities
+      WHERE OpportunityId = ?
+        AND LeadId = ?
+        AND IsDeleted = 0
       `,
-      [normalizedProjectId, leadId]
+      [OpportunityId, leadId]
     );
 
-    if (!projectRows.length) {
+    if (!existingRows.length) {
       await conn.rollback();
       return NextResponse.json(
-        { error: "Selected project does not belong to this customer" },
-        { status: 400 }
+        { error: "Opportunity not found" },
+        { status: 404 }
       );
     }
 
-    /* 1 UPDATE OPPORTUNITY */
-    await conn.query(
-      `
-      UPDATE Opportunities
-      SET
-        ProjectId = ?,
-        ServiceId = ?,
-        ProbabilityId = ?,
-        EngagementId = ?,
-        Opportunity_StatusId = ?,
-        ModifiedOn = NOW()
-      WHERE OpportunityId = ?
-        AND LeadId = ?
-      `,
-      [
-        normalizedProjectId,
-        serviceId,
-        probabilityId,
-        engagementId,
-        statusId,
-        OpportunityId,
-        leadId,
-      ]
-    );
+    const existingOpportunity = existingRows[0];
+    const currentProjectId = existingOpportunity.ProjectId ?? null;
+    let projectIdToSave =
+      normalizedProjectId !== null ? normalizedProjectId : currentProjectId;
+
+    if (projectIdToSave !== null) {
+      const [projectRows]: any = await conn.query(
+        `
+        SELECT ProjectId
+        FROM Projects
+        WHERE ProjectId = ?
+          AND CustomerId = ?
+          AND COALESCE(IsHidden, 0) = 0
+        `,
+        [projectIdToSave, leadId]
+      );
+
+      if (!projectRows.length) {
+        await conn.rollback();
+        return NextResponse.json(
+          { error: "Selected project does not belong to this customer" },
+          { status: 400 }
+        );
+      }
+    }
 
     /* 2 RESET TECHNOLOGIES */
     await conn.query(
@@ -326,6 +344,35 @@ export async function PUT(
         [OpportunityId, subCategoryId]
       );
     }
+
+    /* 5 UPDATE OPPORTUNITY */
+    await conn.query(
+      `
+      UPDATE Opportunities
+      SET
+        ProjectId = ?,
+        ServiceId = ?,
+        ProbabilityId = ?,
+        EngagementId = ?,
+        Opportunity_StatusId = ?,
+        IsCompleted = COALESCE(?, IsCompleted),
+        ModifiedOn = NOW()
+      WHERE OpportunityId = ?
+        AND LeadId = ?
+      `,
+      [
+        projectIdToSave,
+        serviceId,
+        probabilityId,
+        engagementId,
+        statusId,
+        isComplete === undefined || isComplete === null
+          ? null
+          : Number(Boolean(isComplete)),
+        OpportunityId,
+        leadId,
+      ]
+    );
 
     await conn.commit();
 

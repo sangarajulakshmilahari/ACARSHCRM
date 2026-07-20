@@ -90,7 +90,7 @@ export async function PUT(
   { params }: { params: { leadID: string } },
 ) {
   try {
-    const { ActivityId, Mode, Notes, Status, ActivityDate } = await req.json();
+    const { ActivityId, Mode, Notes, Status, ActivityDate, ContactId } = await req.json();
 
     if (!ActivityId) {
       return NextResponse.json(
@@ -123,7 +123,8 @@ export async function PUT(
         ActivityType = ?,
         Notes = ?,
         StatusId = ?,
-        ActivityDate = ?
+        ActivityDate = ?,
+        ContactId = ?
       WHERE ActivityId = ?
       `,
       [
@@ -131,6 +132,7 @@ export async function PUT(
         Notes,
         StatusId,
         ActivityDate ? new Date(ActivityDate) : new Date(),
+        ContactId ?? null,
         ActivityId,
       ],
     );
@@ -166,6 +168,7 @@ export async function GET(
         la.Notes,
         ls.StatusName AS Status,
         la.ActivityDate,
+        la.ContactId,
         lc.ContactName
       FROM LeadActivities la
       LEFT JOIN LeadStatuses ls

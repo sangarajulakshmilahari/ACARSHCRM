@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatLocaleDate } from "@/app/utils/dateTime";
+import { formatLocaleDate, formatLocaleDateTime } from "@/app/utils/dateTime";
 import {
   convertLeadDirectToAccountWithExistingFlow,
   convertLeadWithExistingFlow,
@@ -26,6 +26,7 @@ type Activity = {
   Mode: string;
   Notes?: string;
   Status?: string;
+  ContactId?: number | null;
   ContactName?: string;
 };
 
@@ -77,13 +78,47 @@ type Project = {
   TeamMembers?: Array<{
     EmployeeId?: number | string;
     EmployeeName?: string | null;
+    Title?: string | null;
+    StartDate?: string | null;
+    EndDate?: string | null;
+    ReportingManager?: string | null;
+    ReportingManagerTitle?: string | null;
   }>;
   ProjectContacts?: Array<{
     ContactId?: number;
     ProjectId?: number;
     ContactName?: string | null;
     ContactTypeId?: number;
+    Title?: string | null;
+    Email?: string | null;
+    Phone?: string | null;
   }>;
+};
+
+type EmployeeSuggestion = {
+  EmployeeId: string;
+  EmployeeName: string;
+};
+
+type ProjectResourceDraft = {
+  resourceName: string;
+  employeeId: string | null;
+  title: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+  reportingManager: string;
+  reportingManagerTitle: string;
+  suggestions: EmployeeSuggestion[];
+  showSuggestions: boolean;
+  isSearching: boolean;
+};
+
+type ProjectContactDraft = {
+  contactName: string;
+  title: string;
+  email: string;
+  phone: string;
 };
 
 type Lead = {
@@ -179,6 +214,7 @@ export default function LeadDetailsClient({
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectFormMode, setProjectFormMode] = useState<"add" | "edit">("add");
   const [projectActionLoading, setProjectActionLoading] = useState<number | null>(null);
+  const [isProjectOngoing, setIsProjectOngoing] = useState(false);
   const [projectForm, setProjectForm] = useState({
     ProjectId: null as number | null,
     ProjectCode: "",
@@ -192,6 +228,10 @@ export default function LeadDetailsClient({
     StartDate: "",
     EndDate: "",
   });
+  const [projectContactsInput, setProjectContactsInput] = useState<ProjectContactDraft[]>([]);
+  const [projectResourcesInput, setProjectResourcesInput] = useState<ProjectResourceDraft[]>([]);
+  const [opportunityProjectSearch, setOpportunityProjectSearch] = useState("");
+  const [autoPrefilledOppContacts, setAutoPrefilledOppContacts] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showProjectSummary, setShowProjectSummary] = useState(false);
   const [projectSummaryLoading, setProjectSummaryLoading] = useState(false);
@@ -258,6 +298,7 @@ export default function LeadDetailsClient({
   const [leadStatuses, setLeadStatuses] = useState<any[]>([]);
   const [engagementModels, setEngagementModels] = useState<any[]>([]);
   const [Services, setServices] = useState<any[]>([]);
+  const [probabilities, setProbabilities] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/masters/others")
@@ -277,6 +318,9 @@ export default function LeadDetailsClient({
 
         if (Array.isArray(data?.services)) {
           setServices(data.services);
+        }
+        if (Array.isArray(data?.probabilities)) {
+          setProbabilities(data.probabilities);
         }
       });
   }, []);
@@ -354,6 +398,12 @@ export default function LeadDetailsClient({
     Notification: "",
   });
 
+  const toSqlDateTime = (input: string): string => {
+    if (!input) return "";
+    const normalized = input.includes("T") ? input.replace("T", " ") : input;
+    return normalized.length === 16 ? `${normalized}:00` : normalized;
+  };
+
   const resetOpportunityForm = () => {
     setOpportunityForm({
       projectId: "",
@@ -363,6 +413,8 @@ export default function LeadDetailsClient({
       engagementId: "",
       technologies: [],
     });
+    setOpportunityProjectSearch("");
+    setAutoPrefilledOppContacts(false);
   };
 
   const [opportunityForm, setOpportunityForm] = useState({
@@ -374,51 +426,42 @@ export default function LeadDetailsClient({
     technologies: [] as number[],
   });
 
-  const getActiveProjectsForOpportunity = () => {
-    return (lead?.Projects || []).filter(
-      (project) => String(project.Status || "Active").toLowerCase() !== "hidden"
-    );
-  };
+  const closedWonStatusIds = opportunityStatuses
+    .filter((s) =>
+      typeof s.Opportunities_StatusName === "string" &&
+      ["closed won", "won", "done", "completed"].some((value) =>
+        s.Opportunities_StatusName.trim().toLowerCase().includes(value)
+      )
+    )
+    .map((s) => s.Opportunity_StatusId);
+  const closedWonStatusId = closedWonStatusIds.length ? closedWonStatusIds[0] : null;
+  const isClosedWonStatusSelected =
+    opportunityForm.statusId !== "" &&
+    closedWonStatusIds.includes(opportunityForm.statusId as number);
+  const isHundredPercentProbabilitySelected = (() => {
+    const selectedProbabilityId = Number(opportunityForm.probabilityId);
+    if (!selectedProbabilityId || Number.isNaN(selectedProbabilityId)) return false;
 
-  const mapProjectContactsToOppContacts = (project: Project | null | undefined) => {
-    const contacts = project?.ProjectContacts || [];
-    return contacts
-      .filter((contact) => (contact.ContactName || "").trim().length > 0)
-      .map((contact) => ({
-        FullName: contact.ContactName || "",
-        CompanyName: lead?.CompanyName || project?.CompanyName || "",
-      })) as OppContact[];
-  };
+    const source =
+      Array.isArray(probabilities) && probabilities.length > 0
+        ? probabilities.map((p) => ({
+          id: Number(p.ProbabilityId),
+          label: String(p.ProbabilityRange || "").trim(),
+        }))
+        : [
+          { id: 1, label: "<25%" },
+          { id: 2, label: "50%" },
+          { id: 3, label: "75%" },
+          { id: 4, label: "90%" },
+          { id: 5, label: "100%" },
+        ];
 
-  const handleOpportunityProjectChange = async (projectIdValue: number | "") => {
-    setOpportunityForm((prev) => ({ ...prev, projectId: projectIdValue }));
+    const selected = source.find((p) => p.id === selectedProbabilityId);
+    if (!selected) return false;
 
-    if (!effectiveLeadId || !projectIdValue) {
-      setOppContacts([]);
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${Number(projectIdValue)}`
-      );
-
-      if (!res.ok) {
-        setOppContacts([]);
-        return;
-      }
-
-      const projectDetails = (await res.json()) as Project | null;
-      const mappedContacts = mapProjectContactsToOppContacts(projectDetails);
-
-      setOppContacts(mappedContacts);
-      setSelectedOppContactIndex(null);
-      setOppContactForm(EMPTY_OPP_CONTACT_FORM);
-    } catch (err) {
-      console.error("Failed to load project contacts for opportunity:", err);
-      setOppContacts([]);
-    }
-  };
+    return /100\s*%/.test(selected.label);
+  })();
+  const hasSelectedProject = typeof opportunityForm.projectId === "number";
 
   const handleAddOpportunityClick = () => {
     setMode("add");
@@ -431,11 +474,6 @@ export default function LeadDetailsClient({
     setOppContacts([]);
     setOppContactForm(EMPTY_OPP_CONTACT_FORM);
     setSelectedOppContactIndex(null);
-
-    const activeProjects = getActiveProjectsForOpportunity();
-    if (activeProjects.length === 1) {
-      handleOpportunityProjectChange(activeProjects[0].ProjectId);
-    }
 
     setOpportunityView("OPPORTUNITY");
     setShowAddOpportunity(true);
@@ -563,7 +601,7 @@ export default function LeadDetailsClient({
   };
 
   const formatDateTime = (value?: string) => {
-    return formatLocaleDate(value, undefined, "—");
+    return formatLocaleDateTime(value, undefined, "—");
   };
 
   const toDisplayValue = (value?: string | null) => {
@@ -600,6 +638,9 @@ export default function LeadDetailsClient({
         ProjectId?: number;
         ContactName?: string | null;
         ContactTypeId?: number;
+        Title?: string | null;
+        Email?: string | null;
+        Phone?: string | null;
       }>;
     }
 
@@ -607,6 +648,37 @@ export default function LeadDetailsClient({
       const name = contact?.ContactName;
       return typeof name === "string" && name.trim().length > 0;
     });
+  };
+
+  const getMemberField = (member: any, keys: string[]) => {
+    for (const key of keys) {
+      const value = member?.[key];
+      if (value !== undefined && value !== null && String(value).trim().length > 0) {
+        return String(value).trim();
+      }
+    }
+    return "";
+  };
+
+  const isOngoingValue = (value?: string | null) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return true;
+    return ["ongoing", "active", "current", "present", "open"].includes(normalized);
+  };
+
+  const oldProjectTeamMembers = getProjectTeamMembers().filter((member: any) => {
+    const endDate = getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]);
+    return endDate.length > 0 && !isOngoingValue(endDate);
+  });
+
+  const newProjectTeamMembers = getProjectTeamMembers().filter((member: any) => {
+    const endDate = getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]);
+    return endDate.length === 0 || isOngoingValue(endDate);
+  });
+
+  const formatMemberDate = (value?: string | null, fallback = "Ongoing") => {
+    if (!value || isOngoingValue(value)) return fallback;
+    return formatProjectDate(value);
   };
 
   const toggleProjectSummaryAccordion = (
@@ -633,12 +705,14 @@ export default function LeadDetailsClient({
     return formatLocaleDate(value, undefined, "Not Available");
   };
 
-  const getProjectStartDateDisplay = () => {
-    return "Jan 1, 2026";
+  const getProjectStartDateDisplay = (project?: { StartDate?: string | null } | null) => {
+    return formatProjectDate(project?.StartDate ?? selectedProject?.StartDate ?? null);
   };
 
-  const getProjectEndDateDisplay = () => {
-    return "Ongoing";
+  const getProjectEndDateDisplay = (project?: { EndDate?: string | null } | null) => {
+    const endDate = project?.EndDate ?? selectedProject?.EndDate ?? null;
+    if (!endDate) return "Ongoing";
+    return formatProjectDate(endDate);
   };
 
   const formatPointsForEditor = (value?: string | null) => {
@@ -671,6 +745,162 @@ export default function LeadDetailsClient({
       StartDate: "",
       EndDate: "",
     });
+    setIsProjectOngoing(false);
+    setProjectContactsInput([]);
+    setProjectResourcesInput([]);
+  };
+
+  const mapTeamMembersToResourceDrafts = (
+    teamMembers?: Array<{
+      EmployeeId?: number | string;
+      EmployeeName?: string | null;
+      Title?: string | null;
+      StartDate?: string | null;
+      EndDate?: string | null;
+      ReportingManager?: string | null;
+      ReportingManagerTitle?: string | null;
+    }>
+  ): ProjectResourceDraft[] => {
+    if (!Array.isArray(teamMembers)) return [];
+
+    return teamMembers
+      .map((member) => {
+        const employeeId =
+          member?.EmployeeId === null || member?.EmployeeId === undefined
+            ? null
+            : String(member.EmployeeId);
+        const employeeName = String(member?.EmployeeName ?? "").trim();
+
+        return {
+          resourceName: employeeName || employeeId || "",
+          employeeId,
+          title: String((member as any)?.Title ?? "").trim(),
+          startDate: member?.StartDate ? String(member.StartDate).split("T")[0] : "",
+          endDate: member?.EndDate ? String(member.EndDate).split("T")[0] : "",
+          isCurrent:
+            !member?.EndDate ||
+            isOngoingValue(String((member as any)?.EndDate ?? "").trim()),
+          reportingManager: String((member as any)?.ReportingManager ?? "").trim(),
+          reportingManagerTitle: String((member as any)?.ReportingManagerTitle ?? "").trim(),
+          suggestions: [],
+          showSuggestions: false,
+          isSearching: false,
+        };
+      })
+      .filter((resource) => resource.resourceName.length > 0);
+  };
+
+  const mapProjectContactsToInput = (
+    contacts?: Array<{
+      ContactName?: string | null;
+      Title?: string | null;
+      Email?: string | null;
+      Phone?: string | null;
+    }>
+  ): ProjectContactDraft[] => {
+    if (!Array.isArray(contacts)) return [];
+    return contacts
+      .map((contact) => ({
+        contactName: String(contact?.ContactName ?? "").trim(),
+        title: String((contact as any)?.Title ?? "").trim(),
+        email: String((contact as any)?.Email ?? "").trim(),
+        phone: String((contact as any)?.Phone ?? "").trim(),
+      }))
+      .filter((contact) => contact.contactName.length > 0);
+  };
+
+  const updateProjectResourceAt = (
+    index: number,
+    updater: (prev: ProjectResourceDraft) => ProjectResourceDraft
+  ) => {
+    setProjectResourcesInput((prev) =>
+      prev.map((item, idx) => (idx === index ? updater(item) : item))
+    );
+  };
+
+  const fetchEmployeeSuggestions = async (index: number, keyword: string) => {
+    if (!effectiveLeadId) return;
+    const term = keyword.trim();
+
+    if (term.length < 2) {
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+        isSearching: false,
+      }));
+      return;
+    }
+
+    updateProjectResourceAt(index, (prev) => ({ ...prev, isSearching: true }));
+
+    try {
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?employeeSearch=${encodeURIComponent(
+          term
+        )}`
+      );
+
+      if (!res.ok) {
+        updateProjectResourceAt(index, (prev) => ({
+          ...prev,
+          suggestions: [],
+          showSuggestions: false,
+          isSearching: false,
+        }));
+        return;
+      }
+
+      const data = await res.json();
+      const suggestions = Array.isArray(data) ? data : [];
+
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions,
+        showSuggestions: suggestions.length > 0,
+        isSearching: false,
+      }));
+    } catch {
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+        isSearching: false,
+      }));
+    }
+  };
+
+  const prefillOpportunityFromProject = async (projectId: number) => {
+    if (!effectiveLeadId || mode !== "add") return;
+
+    try {
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${projectId}`
+      );
+
+      if (!res.ok) return;
+
+      const projectData: Project = await res.json();
+      const prefills = (projectData?.ProjectContacts || [])
+        .map((contact) => ({
+          FullName: String((contact as any)?.ContactName ?? "").trim(),
+          WorkEmail: String((contact as any)?.Email ?? "").trim(),
+          JobTitle: String((contact as any)?.Title ?? "").trim(),
+          MobilePhone: String((contact as any)?.Phone ?? "").trim(),
+        }))
+        .filter((contact) => contact.FullName.length > 0)
+        .map((contact) => ({
+          ...EMPTY_OPP_CONTACT_FORM,
+          ...contact,
+        }));
+
+      if (prefills.length > 0) {
+        setOppContacts(prefills);
+        setAutoPrefilledOppContacts(true);
+      }
+    } catch {
+      // no-op
+    }
   };
 
   const openAddProjectForm = () => {
@@ -679,7 +909,18 @@ export default function LeadDetailsClient({
     setShowProjectForm(true);
   };
 
-  const openEditProjectForm = (project: Project) => {
+  const openProjectFormById = async (projectId: number) => {
+    if (!effectiveLeadId || !projectId) return;
+
+    const res = await fetch(
+      `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${projectId}`
+    );
+
+    if (!res.ok) {
+      throw new Error("Failed to load project details");
+    }
+
+    const project: Project = await res.json();
     setProjectFormMode("edit");
     setProjectForm({
       ProjectId: project.ProjectId,
@@ -694,7 +935,16 @@ export default function LeadDetailsClient({
       StartDate: project.StartDate ? String(project.StartDate).split("T")[0] : "",
       EndDate: project.EndDate ? String(project.EndDate).split("T")[0] : "",
     });
+    setIsProjectOngoing(!project.EndDate);
+    setProjectContactsInput(mapProjectContactsToInput(project.ProjectContacts));
+    setProjectResourcesInput(mapTeamMembersToResourceDrafts(project.TeamMembers));
     setShowProjectForm(true);
+  };
+
+  const openEditProjectForm = (project: Project) => {
+    openProjectFormById(project.ProjectId).catch((error: any) => {
+      alert(error?.message || "Failed to load project details");
+    });
   };
 
   const fetchProjectsForLead = async (status: "all" | "active" | "hidden" = projectStatusFilter) => {
@@ -718,6 +968,26 @@ export default function LeadDetailsClient({
       setProjectActionLoading(projectForm.ProjectId ?? -1);
 
       const method = projectFormMode === "add" ? "POST" : "PUT";
+      const normalizedProjectContacts = projectContactsInput
+        .map((contact) => ({
+          contactName: String(contact?.contactName || "").trim(),
+          title: String(contact?.title || "").trim() || null,
+          email: String(contact?.email || "").trim() || null,
+          phone: String(contact?.phone || "").trim() || null,
+        }))
+        .filter((contact) => contact.contactName.length > 0);
+      const normalizedProjectResources = projectResourcesInput
+        .map((resource) => ({
+          resourceName: String(resource.resourceName || "").trim(),
+          employeeId: resource.employeeId,
+          title: String(resource.title || "").trim() || null,
+          startDate: String(resource.startDate || "").trim() || null,
+          endDate: resource.isCurrent ? null : String(resource.endDate || "").trim() || null,
+          reportingManager: String(resource.reportingManager || "").trim() || null,
+          reportingManagerTitle: String(resource.reportingManagerTitle || "").trim() || null,
+        }))
+        .filter((resource) => resource.resourceName.length > 0);
+
       const res = await fetch(`/api/employees/leads/${Number(effectiveLeadId)}/projects`, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -732,7 +1002,9 @@ export default function LeadDetailsClient({
           Deliverables: normalizePointsFromEditor(projectForm.Deliverables),
           Challenges: normalizePointsFromEditor(projectForm.Challenges),
           StartDate: projectForm.StartDate || null,
-          EndDate: projectForm.EndDate || null,
+          EndDate: isProjectOngoing ? null : projectForm.EndDate || null,
+          ProjectContacts: normalizedProjectContacts,
+          ProjectResources: normalizedProjectResources,
         }),
       });
 
@@ -823,7 +1095,7 @@ export default function LeadDetailsClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ReminderDate: reminderForm.ReminderDate,
+          ReminderDate: toSqlDateTime(reminderForm.ReminderDate),
           Notes: reminderForm.Notes,
           Status: reminderForm.Status,
           Notification: reminderForm.Notification,
@@ -879,6 +1151,7 @@ export default function LeadDetailsClient({
           Notes: field === "Notes" ? value : activity.Notes,
           Status: field === "Status" ? value : activity.Status,
           ActivityDate: field === "ActivityDate" ? value : activity.ActivityDate,
+          ContactId: field === "ContactId" ? value : (activity.ContactId ?? null),
         }),
       });
 
@@ -944,6 +1217,8 @@ export default function LeadDetailsClient({
       engagementId: oppData.EngagementId,
       technologies: oppData.TechnologyIds || [],
     });
+    setOpportunityProjectSearch(oppData.ProjectName || "");
+    setAutoPrefilledOppContacts(false);
 
     setOriginalTechnologies(oppData.TechnologyIds || []);
 
@@ -1019,7 +1294,9 @@ export default function LeadDetailsClient({
     ).join(", ");
   };
 
-  const handleSaveOpportunity = async () => {
+  const handleSaveOpportunity = async (
+    options?: { keepOpen?: boolean; markComplete?: boolean }
+  ): Promise<{ OpportunityId: number | null; savedOpportunity: any } | null> => {
     const isEdit = mode === "edit";
 
     const id = effectiveLeadId ?? leadId;
@@ -1031,27 +1308,22 @@ export default function LeadDetailsClient({
       !opportunityForm.engagementId
     ) {
       alert("Please fill all required opportunity fields");
-      return;
+      return null;
     }
 
     if (!id) {
       alert("Invalid Lead selected");
-      return;
-    }
-
-    if (!opportunityForm.projectId) {
-      alert("Please select a project");
-      return;
+      return null;
     }
 
     if (isEdit && !currentOpportunityId) {
       alert("Opportunity ID missing");
-      return;
+      return null;
     }
 
     if (opportunityForm.technologies.length === 0) {
       alert("Please select at least one Technology");
-      return;
+      return null;
     }
 
     const otherSelected = categories
@@ -1074,7 +1346,7 @@ export default function LeadDetailsClient({
     for (const id of otherIds) {
       if (!otherTechnologyMap[id]?.trim()) {
         alert("Please specify all selected Other technologies");
-        return;
+        return null;
       }
     }
 
@@ -1097,6 +1369,7 @@ export default function LeadDetailsClient({
 
         // 🔑 ADD THIS FLAG
         hasOtherTechnology: Object.keys(otherTechnologyMap).length > 0,
+        isComplete: options?.markComplete ? 1 : undefined,
 
         OpportunityContact: buildOppContactSummary(),
       }),
@@ -1106,7 +1379,7 @@ export default function LeadDetailsClient({
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       alert(err.error || "Failed to save opportunity");
-      return;
+      return null;
     }
 
     // 2 READ RESPONSE
@@ -1170,12 +1443,46 @@ export default function LeadDetailsClient({
       };
     });
 
-    // 5 RESET & CLOSE
-    setShowAddOpportunity(false);
-    setMode("add");
+    // 5 RESET & CLOSE OPPORTUNITY MODAL
+    if (!options?.keepOpen) {
+      setShowAddOpportunity(false);
+      setMode("add");
+    }
 
     if (isEdit) {
       await fetchLeadDetails();
+    }
+
+    return { OpportunityId, savedOpportunity };
+  };
+
+  const handleConvertOpportunityToProject = async () => {
+    if (!effectiveLeadId) return;
+
+    const saveResult = await handleSaveOpportunity({ keepOpen: true, markComplete: true });
+    if (!saveResult) return;
+
+    let projectId =
+      typeof opportunityForm.projectId === "number"
+        ? opportunityForm.projectId
+        : saveResult.savedOpportunity?.ProjectId ?? null;
+
+    try {
+      if (!projectId) {
+        setShowAddOpportunity(false);
+        setMode("add");
+        setOpportunityView("OPPORTUNITY");
+        openAddProjectForm();
+        return;
+      }
+
+      await fetchProjectsForLead(projectStatusFilter);
+      await openProjectFormById(Number(projectId));
+      setShowAddOpportunity(false);
+      setMode("add");
+      setOpportunityView("OPPORTUNITY");
+    } catch (error: any) {
+      alert(error?.message || "Failed to open project form");
     }
   };
 
@@ -2202,7 +2509,54 @@ export default function LeadDetailsClient({
                 </td>
 
                 {/* Contact */}
-                <td style={tdStyle}>{a.ContactName || "—"}</td>
+                <td
+                  style={tdStyle}
+                  onClick={() => setEditingCell(`act-contact-${a.ActivityId}`)}
+                >
+                  {editingCell === `act-contact-${a.ActivityId}` ? (
+                    <select
+                      autoFocus
+                      style={inputBox}
+                      defaultValue={
+                        a.ContactId !== null && a.ContactId !== undefined
+                          ? String(a.ContactId)
+                          : ""
+                      }
+                      onBlur={(e) => {
+                        const selectedValue = e.target.value
+                          ? Number(e.target.value)
+                          : null;
+                        
+                        if (isValueChanged(a.ContactId ?? null, selectedValue)) {
+                          autoSaveActivityField(i, "ContactId", selectedValue);
+                        }
+                        setEditingCell(null);
+                      }}
+                      onChange={(e) => {
+                        const selectedValue = e.target.value
+                          ? Number(e.target.value)
+                          : null;
+
+                        if (isValueChanged(a.ContactId ?? null, selectedValue)) {
+                          autoSaveActivityField(i, "ContactId", selectedValue);
+                        }
+                        // Don't setEditingCell(null) here - let onBlur handle closing
+                      }}
+                    >
+                      <option value="">-- Select Contact --</option>
+                      {(lead.Contacts || []).map((contact) => (
+                        <option
+                          key={contact.LeadContactID}
+                          value={contact.LeadContactID ?? ""}
+                        >
+                          {contact.ContactName || "Unnamed contact"}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    a.ContactName || "—"
+                  )}
+                </td>
 
                 {/* Status */}
                 <td
@@ -2234,9 +2588,11 @@ export default function LeadDetailsClient({
       {/* Reminders */}
       <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
         Reminders
-        <button style={addBtn} onClick={() => setShowAddReminder(true)}>
-          +
-        </button>
+        <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
+          <button style={addBtn} onClick={() => setShowAddReminder(true)}>
+            + 
+          </button>
+        </div>
       </div>
       <div style={tableWrap}>
         <table
@@ -2538,8 +2894,8 @@ export default function LeadDetailsClient({
                           {p.ProjectName}
                         </td>
                         {/* <td style={tdStyle}>{p.CompanyName}</td> */}
-                        <td style={tdStyle}>{getProjectStartDateDisplay()}</td>
-                        <td style={tdStyle}>{getProjectEndDateDisplay()}</td>
+                        <td style={tdStyle}>{getProjectStartDateDisplay(p)}</td>
+                        <td style={tdStyle}>{getProjectEndDateDisplay(p)}</td>
                         <td style={tdStyle}>
                           <span
                             style={{
@@ -2680,6 +3036,7 @@ export default function LeadDetailsClient({
                       borderRadius: 10,
                       padding: "10px 12px",
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      gridColumn: "1 / -1",
                     }}
                   >
                     <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
@@ -2696,7 +3053,6 @@ export default function LeadDetailsClient({
                       border: "1px solid #e2e8f0",
                       borderRadius: 10,
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
-                      gridColumn: "1 / -1",
                       overflow: "hidden",
                     }}
                   >
@@ -2749,84 +3105,7 @@ export default function LeadDetailsClient({
                       }}
                     >
                       <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                        Project Team
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#475569",
-                          fontWeight: 600,
-                          background: "#f1f5f9",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 999,
-                          padding: "2px 10px",
-                        }}
-                      >
-                        {getProjectTeamMembers().length} Member{getProjectTeamMembers().length === 1 ? "" : "s"}
-                      </div>
-                    </div>
-
-                    {getProjectTeamMembers().length > 0 ? (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 8,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div style={{ maxHeight: 170, overflowY: "auto" }}>
-                          {getProjectTeamMembers().map((member, index) => (
-                            <div
-                              key={`${member.EmployeeId ?? "member"}-${index}`}
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "1fr",
-                                gap: 0,
-                                padding: "8px 10px",
-                                borderBottom:
-                                  index === getProjectTeamMembers().length - 1
-                                    ? "none"
-                                    : "1px solid #f1f5f9",
-                                fontSize: 14,
-                                color: "#0f172a",
-                                alignItems: "center",
-                              }}
-                            >
-                              <span style={{ fontWeight: 500 }}>
-                                {toDisplayValue(member.EmployeeName)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
-                        No team members assigned.
-                      </div>
-                    )}
-                  </section>
-
-                  <section
-                    style={{
-                      background: "#fff",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: 10,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                        Project Contacts
+                        Project Contact
                       </div>
                       <div
                         style={{
@@ -2844,37 +3123,28 @@ export default function LeadDetailsClient({
                     </div>
 
                     {getProjectContacts().length > 0 ? (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 8,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div style={{ maxHeight: 170, overflowY: "auto" }}>
-                          {getProjectContacts().map((contact, index) => (
-                            <div
-                              key={`${contact.ContactId ?? "contact"}-${index}`}
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "1fr",
-                                gap: 0,
-                                padding: "8px 10px",
-                                borderBottom:
-                                  index === getProjectContacts().length - 1
-                                    ? "none"
-                                    : "1px solid #f1f5f9",
-                                fontSize: 14,
-                                color: "#0f172a",
-                                alignItems: "center",
-                              }}
-                            >
-                              <span style={{ fontWeight: 500 }}>
-                                {toDisplayValue(contact.ContactName)}
-                              </span>
-                            </div>
-                          ))}
+                      <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ background: "#f8fafc" }}>
+                                <th style={oppTh}>Contact Name</th>
+                                <th style={oppTh}>Title</th>
+                                <th style={oppTh}>Email</th>
+                                <th style={oppTh}>Phone</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {getProjectContacts().map((contact, index) => (
+                                <tr key={`${contact.ContactId ?? "contact"}-${index}`}>
+                                  <td style={oppTd}>{toDisplayValue(contact.ContactName)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Title || (contact as any).ContactTitle)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Email || (contact as any).ContactEmail)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Phone || (contact as any).ContactPhone)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       </div>
                     ) : (
@@ -2883,6 +3153,102 @@ export default function LeadDetailsClient({
                       </div>
                     )}
                   </section>
+
+                  {[{
+                    title: "Old Project Team Members",
+                    members: oldProjectTeamMembers,
+                  }, {
+                    title: "New Project Team Members",
+                    members: newProjectTeamMembers,
+                  }].map((group) => (
+                    <section
+                      key={group.title}
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                        gridColumn: "span 1",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          {group.title}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#475569",
+                            fontWeight: 600,
+                            background: "#f1f5f9",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 999,
+                            padding: "2px 10px",
+                          }}
+                        >
+                          {group.members.length} Member{group.members.length === 1 ? "" : "s"}
+                        </div>
+                      </div>
+
+                      {group.members.length > 0 ? (
+                        <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ background: "#f8fafc" }}>
+                                  <th style={oppTh}>Name</th>
+                                  <th style={oppTh}>Title</th>
+                                  <th style={oppTh}>Start Date</th>
+                                  <th style={oppTh}>End Date</th>
+                                  <th style={oppTh}>Reporting Manager</th>
+                                  <th style={oppTh}>Reporting Manager Title</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.members.map((member: any, index) => (
+                                  <tr key={`${member.EmployeeId ?? group.title}-${index}`}>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["EmployeeName", "Name"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["Title", "EmployeeTitle", "Role"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {formatMemberDate(getMemberField(member, ["StartDate", "startDate", "AllocationStartDate"]), "—")}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {formatMemberDate(getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["ReportingManager", "ManagerName"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(
+                                        getMemberField(member, ["ReportingManagerTitle", "ManagerTitle"])
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+                          No members available.
+                        </div>
+                      )}
+                    </section>
+                  ))}
 
                   {([
                     {
@@ -3008,7 +3374,7 @@ export default function LeadDetailsClient({
                   {projectFormMode === "add" ? "Add Project" : "Edit Project"}
                 </div>
 
-                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <div style={{ padding: 14, display: "grid", gap: 10 }}>
                   <input
                     style={{ ...inputBox, width: "100%" }}
                     placeholder="Project Code"
@@ -3076,11 +3442,374 @@ export default function LeadDetailsClient({
                       <label style={{ ...labelStyle, marginBottom: 4, display: "block" }}>End Date</label>
                       <input
                         type="date"
-                        style={{ ...inputBox, width: "100%" }}
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          background: isProjectOngoing ? "#f1f5f9" : "#fff",
+                          color: isProjectOngoing ? "#94a3b8" : "#0f172a",
+                          cursor: isProjectOngoing ? "not-allowed" : "text",
+                        }}
                         value={projectForm.EndDate}
+                        disabled={isProjectOngoing}
                         onChange={(e) => setProjectForm((prev) => ({ ...prev, EndDate: e.target.value }))}
                       />
                     </div>
+                  </div>
+
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 13,
+                      color: "#334155",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isProjectOngoing}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsProjectOngoing(checked);
+                        if (checked) {
+                          setProjectForm((prev) => ({ ...prev, EndDate: "" }));
+                        }
+                      }}
+                      style={{ accentColor: "#F26522", cursor: "pointer" }}
+                    />
+                    Project still going on (Current)
+                  </label>
+
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ ...labelStyle, marginBottom: 6, display: "block" }}>
+                      Project Contacts
+                    </label>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {projectContactsInput.map((contact, index) => (
+                        <div
+                          key={`project-contact-${index}`}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "2fr 1fr 1.5fr 1fr auto",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder={`Contact Name ${index + 1}`}
+                            value={contact.contactName}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, contactName: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Title"
+                            value={contact.title}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, title: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Email"
+                            value={contact.email}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, email: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Phone"
+                            value={contact.phone}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, phone: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <button
+                            type="button"
+                            style={{ ...cancelBtn, padding: "0 12px", height: 36 }}
+                            onClick={() =>
+                              setProjectContactsInput((prev) =>
+                                prev.filter((_, idx) => idx !== index)
+                              )
+                            }
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      style={{ ...secondaryBtn, marginTop: 8, width: "fit-content" }}
+                      onClick={() =>
+                        setProjectContactsInput((prev) => [
+                          ...prev,
+                          {
+                            contactName: "",
+                            title: "",
+                            email: "",
+                            phone: "",
+                          },
+                        ])
+                      }
+                    >
+                      + Add Project Contact
+                    </button>
+                  </div>
+
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: 6, display: "block" }}>
+                      Project Resources
+                    </label>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {projectResourcesInput.map((resource, index) => (
+                        <div key={`project-resource-${index}`} style={{ position: "relative" }}>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Type resource name (employee suggestion supported)"
+                              value={resource.resourceName}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  resourceName: value,
+                                  employeeId: null,
+                                }));
+                                fetchEmployeeSuggestions(index, value);
+                              }}
+                              onFocus={() => {
+                                if (resource.suggestions.length > 0) {
+                                  updateProjectResourceAt(index, (prev) => ({
+                                    ...prev,
+                                    showSuggestions: true,
+                                  }));
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              style={{ ...cancelBtn, padding: "0 12px", height: 36 }}
+                              onClick={() =>
+                                setProjectResourcesInput((prev) =>
+                                  prev.filter((_, idx) => idx !== index)
+                                )
+                              }
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Title"
+                              value={resource.title}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  title: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              type="date"
+                              style={{ ...inputBox, width: "100%" }}
+                              value={resource.startDate}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  startDate: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              type="date"
+                              style={{
+                                ...inputBox,
+                                width: "100%",
+                                background: resource.isCurrent ? "#f1f5f9" : "#fff",
+                                color: resource.isCurrent ? "#94a3b8" : "#0f172a",
+                                cursor: resource.isCurrent ? "not-allowed" : "text",
+                              }}
+                              value={resource.endDate}
+                              disabled={resource.isCurrent}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  endDate: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 8,
+                              fontSize: 12,
+                              color: "#334155",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={resource.isCurrent}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  isCurrent: e.target.checked,
+                                  endDate: e.target.checked ? "" : prev.endDate,
+                                }))
+                              }
+                              style={{ accentColor: "#F26522", cursor: "pointer" }}
+                            />
+                            Resource currently assigned (Current)
+                          </label>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Reporting Manager"
+                              value={resource.reportingManager}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  reportingManager: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Reporting Manager Title"
+                              value={resource.reportingManagerTitle}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  reportingManagerTitle: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          {/* {resource.employeeId && (
+                            <div style={{ marginTop: 4, color: "#334155", fontSize: 12 }}>
+                              Mapped Employee ID: {resource.employeeId}
+                            </div>
+                          )} */}
+
+                          {resource.isSearching && (
+                            <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
+                              Searching employees...
+                            </div>
+                          )}
+
+                          {resource.showSuggestions && resource.suggestions.length > 0 && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: "calc(100% + 4px)",
+                                left: 0,
+                                right: 0,
+                                background: "#fff",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: 6,
+                                boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+                                zIndex: 5,
+                                maxHeight: 190,
+                                overflowY: "auto",
+                              }}
+                            >
+                              {resource.suggestions.map((suggestion, sIndex) => (
+                                <button
+                                  key={`${suggestion.EmployeeId}-${sIndex}`}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    updateProjectResourceAt(index, (prev) => ({
+                                      ...prev,
+                                      resourceName: suggestion.EmployeeName,
+                                      employeeId: suggestion.EmployeeId,
+                                      showSuggestions: false,
+                                    }));
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    border: "none",
+                                    textAlign: "left",
+                                    background: "#fff",
+                                    padding: "8px 10px",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                                    {suggestion.EmployeeName}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                                    ID: {suggestion.EmployeeId}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      style={{ ...secondaryBtn, marginTop: 8, width: "fit-content" }}
+                      onClick={() =>
+                        setProjectResourcesInput((prev) => [
+                          ...prev,
+                          {
+                            resourceName: "",
+                            employeeId: null,
+                            title: "",
+                            startDate: "",
+                            endDate: "",
+                            isCurrent: false,
+                            reportingManager: "",
+                            reportingManagerTitle: "",
+                            suggestions: [],
+                            showSuggestions: false,
+                            isSearching: false,
+                          },
+                        ])
+                      }
+                    >
+                      + Add Project Resource
+                    </button>
                   </div>
                 </div>
 
@@ -3423,9 +4152,9 @@ export default function LeadDetailsClient({
 
             {/* Body */}
             <div style={modalBody}>
-              <label>Reminder Date*</label>
+              <label>Reminder Date & Time*</label>
               <input
-                type="date"
+                type="datetime-local"
                 style={{ ...inputBox, width: 480 }}
                 value={reminderForm.ReminderDate}
                 onChange={(e) =>
@@ -3543,7 +4272,17 @@ export default function LeadDetailsClient({
                   {/* FIRST ROW - 3 COLUMNS */}
                   <div style={formRow3}>
                     <div style={fieldGroup}>
-                      <label>Project *</label>
+                      <label>Project (Optional)</label>
+                      {/* <input
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                        placeholder="Search project by name"
+                        value={opportunityProjectSearch}
+                        onChange={(e) => setOpportunityProjectSearch(e.target.value)}
+                      /> */}
                       <select
                         style={{
                           ...inputBox,
@@ -3551,18 +4290,46 @@ export default function LeadDetailsClient({
                           boxSizing: "border-box",
                         }}
                         value={opportunityForm.projectId}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const value = e.target.value;
-                          handleOpportunityProjectChange(value ? Number(value) : "");
+                          const selectedProjectId = value ? Number(value) : "";
+                          const selectedProject = (lead?.Projects || []).find(
+                            (project) => project.ProjectId === selectedProjectId
+                          );
+
+                          setOpportunityForm({
+                            ...opportunityForm,
+                            projectId: selectedProjectId,
+                          });
+                          setOpportunityProjectSearch(selectedProject?.ProjectName || "");
+
+                          if (typeof selectedProjectId === "number") {
+                            await prefillOpportunityFromProject(selectedProjectId);
+                          }
                         }}
                       >
                         <option value="">-- Select Project --</option>
-                        {getActiveProjectsForOpportunity().map((project) => (
-                          <option key={project.ProjectId} value={project.ProjectId}>
-                            {project.ProjectName}
-                          </option>
-                        ))}
+                        {(lead?.Projects || [])
+                          .filter(
+                            (project) =>
+                              String(project.Status || "Active").toLowerCase() !== "hidden"
+                          )
+                          .filter((project) => {
+                            const search = opportunityProjectSearch.trim().toLowerCase();
+                            if (!search) return true;
+                            return String(project.ProjectName || "")
+                              .toLowerCase()
+                              .includes(search);
+                          })
+                          .map((project) => (
+                            <option key={project.ProjectId} value={project.ProjectId}>
+                              {project.ProjectName}
+                            </option>
+                          ))}
                       </select>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>
+                        Leave empty for new project opportunities. Select a project only when this opportunity belongs to an existing project.
+                      </div>
                     </div>
 
                     <div style={fieldGroup}>
@@ -3664,14 +4431,32 @@ export default function LeadDetailsClient({
                         display: "flex",
                         alignItems: "center",
                         gap: 10,
+                        flexWrap: "wrap",
                       }}
                     >
-                      {[
-                        { id: 1, label: "<25%" },
-                        { id: 2, label: "50%" },
-                        { id: 3, label: "75%" },
-                        { id: 4, label: "90%" },
-                      ].map((p) => (
+                      {(() => {
+                        const baseOptions =
+                          Array.isArray(probabilities) && probabilities.length > 0
+                            ? probabilities.map((p) => ({
+                              id: Number(p.ProbabilityId),
+                              label: String(p.ProbabilityRange || "").trim(),
+                            }))
+                            : [
+                              { id: 1, label: "<25%" },
+                              { id: 2, label: "50%" },
+                              { id: 3, label: "75%" },
+                              { id: 4, label: "90%" },
+                            ];
+
+                        const hasHundred = baseOptions.some((p) =>
+                          String(p.label || "").replace(/\s+/g, "").includes("100%")
+                        );
+
+                        const normalizedOptions = hasHundred
+                          ? baseOptions
+                          : [...baseOptions, { id: 5, label: "100%" }];
+
+                        return normalizedOptions.map((p) => (
                         <label
                           key={p.id}
                           style={{
@@ -3695,8 +4480,13 @@ export default function LeadDetailsClient({
                           />
                           {p.label}
                         </label>
-                      ))}
+                      ));
+                      })()}
                     </div>
+                    {/* <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+                      Selecting 90% or higher is usually a strong conversion signal. Use
+                      "Mark as Converted" to make this opportunity Closed Won / Done.
+                    </div> */}
                   </div>
 
                   {/* TECHNOLOGY */}
@@ -3864,6 +4654,12 @@ export default function LeadDetailsClient({
                         +
                       </button>
                     </div>
+
+                    {autoPrefilledOppContacts && (
+                      <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                        Opportunity contacts were auto-populated from the selected project. You can edit them before saving.
+                      </div>
+                    )}
 
                     {/* OPPORTUNITY CONTACTS TABLE */}
                     {oppContacts.length > 0 && (
@@ -4478,8 +5274,16 @@ export default function LeadDetailsClient({
                 </button>
               )}
               {opportunityView === "OPPORTUNITY" && (
-                <button style={saveBtn} onClick={handleSaveOpportunity}>
+                <button style={saveBtn} onClick={() => void handleSaveOpportunity()}>
                   Save Opportunity
+                </button>
+              )}
+              {opportunityView === "OPPORTUNITY" && isHundredPercentProbabilitySelected && (
+                <button
+                  style={{ ...saveBtn, background: "#1F3A68" }}
+                  onClick={() => void handleConvertOpportunityToProject()}
+                >
+                  {hasSelectedProject ? "Convert to Project" : "Add Project"}
                 </button>
               )}
             </div>
@@ -4526,4 +5330,5 @@ const dropdownItem: React.CSSProperties = {
   borderRadius: "4px",
   color: "#F26522",
 };
+
 

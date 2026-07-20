@@ -77,7 +77,7 @@ WHERE l.LeadId = ?
       );
 
       /* 3. Activities */
-       const [activities]: any = await conn.query(
+      const [activities]: any = await conn.query(
         `
         SELECT
           la.ActivityId,
@@ -85,6 +85,7 @@ WHERE l.LeadId = ?
           la.ActivityType AS Mode,
           la.Notes,
           ls.StatusName AS Status,
+          la.ContactId,
           lc.ContactName
         FROM LeadActivities la
         LEFT JOIN LeadStatuses ls ON la.StatusId = ls.StatusId
@@ -101,7 +102,7 @@ WHERE l.LeadId = ?
         `
         SELECT
           lr.ReminderId,
-          DATE_FORMAT(lr.ReminderDate, '%Y-%m-%d') AS ReminderDate,
+          DATE_FORMAT(lr.ReminderDate, '%Y-%m-%d %H:%i:%s') AS ReminderDate,
           lr.ReminderNote AS Notes,
           lr.Status,
           lr.NotificationChannels AS Notification
@@ -111,6 +112,7 @@ WHERE l.LeadId = ?
         `,
         [leadId]
       );
+
 
       /* 5. Opportunities */
       const [opportunities]: any = await conn.query(
@@ -157,6 +159,7 @@ WHERE l.LeadId = ?
         ) cnt ON cnt.OpportunityId = o.OpportunityId
         WHERE o.LeadId = ?
           AND o.IsDeleted = 0
+          AND COALESCE(o.IsCompleted, 0) = 0
         ORDER BY o.CreatedOn DESC
         `,
         [leadId]
