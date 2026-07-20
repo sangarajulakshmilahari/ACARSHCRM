@@ -252,14 +252,14 @@ export default function ReportsClient(): JSX.Element {
     <section
       style={{
         background: "#fff",
-        border: "1px solid #e2e8f0",
+        border: "1px solid rgba(31, 58, 104, 0.14)",
         borderRadius: 14,
-        boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+        boxShadow: "0 10px 24px rgba(15, 31, 61, 0.08)",
         padding: 18,
       }}
     >
       <div style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: 0, fontSize: 20, color: "#0f172a" }}>Recent Activities</h2>
+        <h2 style={{ margin: 0, fontSize: 20, color: "#1F3A68" }}>Recent Activities</h2>
         {/* <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>
           Lead activity report with date range filters and latest-first sorting.
         </p> */}
@@ -275,27 +275,27 @@ export default function ReportsClient(): JSX.Element {
           marginBottom: 16,
         }}
       >
-        <label style={{ fontSize: 12, color: "#334155",  minWidth: 100 }}>
+        <label style={{ fontSize: 12, color: "#475569",  minWidth: 100 }}>
           From Date
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+            style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(31, 58, 104, 0.2)" }}
           />
         </label>
 
-        <label style={{ fontSize: 12, color: "#334155", minWidth: 100 }}>
+        <label style={{ fontSize: 12, color: "#475569", minWidth: 100 }}>
           To Date
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+            style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(31, 58, 104, 0.2)" }}
           />
         </label>
 
-        <label style={{ fontSize: 12, color: "#334155", minWidth: 180 }}>
+        <label style={{ fontSize: 12, color: "#475569", minWidth: 180 }}>
           Select User
           <select
             value={selectedUserId}
@@ -306,9 +306,9 @@ export default function ReportsClient(): JSX.Element {
               marginTop: 6,
               padding: "8px 10px",
               borderRadius: 8,
-              border: "1px solid #cbd5e1",
+              border: "1px solid rgba(31, 58, 104, 0.2)",
               background: !isManager ? "#f8fafc" : "#fff",
-              color: "#0f172a",
+              color: "#0F1F3D",
               cursor: !isManager ? "not-allowed" : "pointer",
             }}
           >
@@ -323,7 +323,7 @@ export default function ReportsClient(): JSX.Element {
           </select>
         </label>
 
-        <label style={{ fontSize: 12, color: "#334155", minWidth: 160 }}>
+        <label style={{ fontSize: 12, color: "#475569", minWidth: 160 }}>
           Activity Source
           <select
             value={selectedSource}
@@ -339,9 +339,9 @@ export default function ReportsClient(): JSX.Element {
               marginTop: 6,
               padding: "8px 10px",
               borderRadius: 8,
-              border: "1px solid #cbd5e1",
+              border: "1px solid rgba(31, 58, 104, 0.2)",
               background: "#fff",
-              color: "#0f172a",
+              color: "#0F1F3D",
               cursor: "pointer",
             }}
           >
@@ -358,8 +358,8 @@ export default function ReportsClient(): JSX.Element {
             onClick={applyFilters}
             disabled={loading}
             style={{
-              border: "1px solid #2563eb",
-              background: "#2563eb",
+              border: "1px solid #F26522",
+              background: "#F26522",
               color: "#fff",
               borderRadius: 8,
               padding: "8px 12px",
@@ -375,9 +375,9 @@ export default function ReportsClient(): JSX.Element {
             onClick={resetFilters}
             disabled={loading}
             style={{
-              border: "1px solid #cbd5e1",
+              border: "1px solid rgba(31, 58, 104, 0.2)",
               background: "#fff",
-              color: "#0f172a",
+              color: "#1F3A68",
               borderRadius: 8,
               padding: "8px 12px",
               fontWeight: 600,
@@ -390,9 +390,9 @@ export default function ReportsClient(): JSX.Element {
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", alignItems: "center", marginLeft: "auto" }}>
-          <button type="button" disabled={loading} onClick={() => quickRange("today")} style={{ border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Today</button>
-          <button type="button" disabled={loading} onClick={() => quickRange("last7")} style={{ border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Last 7</button>
-          <button type="button" disabled={loading} onClick={() => quickRange("last30")} style={{ border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Last 30</button>
+          <button type="button" disabled={loading} onClick={() => quickRange("today")} style={{ border: "1px solid rgba(31, 58, 104, 0.18)", background: "rgba(31, 58, 104, 0.08)", color: "#1F3A68", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Today</button>
+          <button type="button" disabled={loading} onClick={() => quickRange("last7")} style={{ border: "1px solid rgba(31, 58, 104, 0.18)", background: "rgba(31, 58, 104, 0.08)", color: "#1F3A68", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Last 7</button>
+          <button type="button" disabled={loading} onClick={() => quickRange("last30")} style={{ border: "1px solid rgba(31, 58, 104, 0.18)", background: "rgba(31, 58, 104, 0.08)", color: "#1F3A68", borderRadius: 999, padding: "6px 10px", cursor: "pointer", opacity: loading ? 0.6 : 1 }}>Last 30</button>
         </div>
       </div>
 
@@ -425,26 +425,26 @@ export default function ReportsClient(): JSX.Element {
             maxWidth: 520,
             padding: "10px 12px",
             borderRadius: 8,
-            border: "1px solid #cbd5e1",
+            border: "1px solid rgba(31, 58, 104, 0.2)",
             fontSize: 13,
-            color: "#0f172a",
+            color: "#0F1F3D",
           }}
         />
       </div>
 
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "auto" }}>
+      <div style={{ border: "1px solid rgba(31, 58, 104, 0.14)", borderRadius: 10, overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
           <thead>
-            <tr style={{ background: "#f8fafc" }}>
+            <tr style={{ background: "#0F1F3D" }}>
               {["Activity Date", "Contact Name", "Company Name", "Activity Type", "Activity Source", "Activity Owner", "Created By User", "Notes"].map((h) => (
                 <th
                   key={h}
                   style={{
                     textAlign: "left",
                     fontSize: 12,
-                    color: "#334155",
+                    color: "#ffffff",
                     padding: "10px 12px",
-                    borderBottom: "1px solid #e2e8f0",
+                    borderBottom: "1px solid rgba(248, 244, 239, 0.12)",
                   }}
                 >
                   {h}
@@ -468,7 +468,7 @@ export default function ReportsClient(): JSX.Element {
             ) : (
               rows.map((row) => (
                 <tr key={row.ActivityId}>
-                  <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#0f172a", fontSize: 13 }}>{formatDateTime(row.ActivityDate)}</td>
+                  <td style={{ padding: "10px 12px", borderBottom: "1px solid rgba(31, 58, 104, 0.1)", color: "#0F1F3D", fontSize: 13 }}>{formatDateTime(row.ActivityDate)}</td>
                   <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#334155", fontSize: 13 }}>{row.ContactName || "—"}</td>
                   <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#334155", fontSize: 13 }}>{row.CompanyName || "—"}</td>
                   <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#334155", fontSize: 13 }}>{row.ActivityType || "—"}</td>

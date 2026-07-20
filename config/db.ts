@@ -4,7 +4,7 @@ const config = {
   host: "localhost",    
   user: "root",          
   password: "root",      
-  database: "acarsh",
+  database: "acarsh_db",
  
   waitForConnections: true,
   connectionLimit: 10,

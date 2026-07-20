@@ -77,7 +77,7 @@ WHERE l.LeadId = ?
       );
 
       /* 3. Activities */
-       const [activities]: any = await conn.query(
+      const [activities]: any = await conn.query(
         `
         SELECT
           la.ActivityId,
@@ -85,6 +85,7 @@ WHERE l.LeadId = ?
           la.ActivityType AS Mode,
           la.Notes,
           ls.StatusName AS Status,
+          la.ContactId,
           lc.ContactName
         FROM LeadActivities la
         LEFT JOIN LeadStatuses ls ON la.StatusId = ls.StatusId
@@ -101,7 +102,7 @@ WHERE l.LeadId = ?
         `
         SELECT
           lr.ReminderId,
-          DATE_FORMAT(lr.ReminderDate, '%Y-%m-%d') AS ReminderDate,
+          DATE_FORMAT(lr.ReminderDate, '%Y-%m-%d %H:%i:%s') AS ReminderDate,
           lr.ReminderNote AS Notes,
           lr.Status,
           lr.NotificationChannels AS Notification
@@ -112,11 +113,14 @@ WHERE l.LeadId = ?
         [leadId]
       );
 
+
       /* 5. Opportunities */
       const [opportunities]: any = await conn.query(
         `
         SELECT
           o.OpportunityId,
+          o.ProjectId,
+          pr.ProjectName,
           DATE_FORMAT(o.CreatedOn, '%Y-%m-%d') AS CreatedDate,
           s.ServiceName AS Service,
           pm.ProbabilityRange AS Probability,
@@ -125,6 +129,7 @@ WHERE l.LeadId = ?
           tech.Technology,
           cnt.OpportunityContact
         FROM Opportunities o
+        LEFT JOIN Projects pr ON o.ProjectId = pr.ProjectId
         LEFT JOIN Services s ON o.ServiceId = s.ServiceId
         LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId
         LEFT JOIN Probability pm ON o.ProbabilityId = pm.ProbabilityId
@@ -133,7 +138,7 @@ WHERE l.LeadId = ?
           SELECT
             oc.OpportunityId,
             GROUP_CONCAT(sc.SubCategoryName SEPARATOR ', ') AS Technology
-          FROM Opportunity_Categories oc
+          FROM Opportunity_categories oc
           JOIN SubCategory sc ON oc.SubCategoryId = sc.SubCategoryId
           GROUP BY oc.OpportunityId
         ) tech ON tech.OpportunityId = o.OpportunityId
@@ -154,6 +159,7 @@ WHERE l.LeadId = ?
         ) cnt ON cnt.OpportunityId = o.OpportunityId
         WHERE o.LeadId = ?
           AND o.IsDeleted = 0
+          AND COALESCE(o.IsCompleted, 0) = 0
         ORDER BY o.CreatedOn DESC
         `,
         [leadId]

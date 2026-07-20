@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatLocaleDate } from "@/app/utils/dateTime";
+import { formatLocaleDate, formatLocaleDateTime } from "@/app/utils/dateTime";
 import {
   convertLeadDirectToAccountWithExistingFlow,
   convertLeadWithExistingFlow,
@@ -25,6 +26,7 @@ type Activity = {
   Mode: string;
   Notes?: string;
   Status?: string;
+  ContactId?: number | null;
   ContactName?: string;
 };
 
@@ -38,6 +40,8 @@ type Reminder = {
 
 type Opportunity = {
   OpportunityId: number;
+  ProjectId?: number | null;
+  ProjectName?: string | null;
 
   // IDs (used for edit)
   ServiceId: number;
@@ -71,6 +75,50 @@ type Project = {
   StartDate?: string;
   EndDate?: string;
   Status?: string;
+  TeamMembers?: Array<{
+    EmployeeId?: number | string;
+    EmployeeName?: string | null;
+    Title?: string | null;
+    StartDate?: string | null;
+    EndDate?: string | null;
+    ReportingManager?: string | null;
+    ReportingManagerTitle?: string | null;
+  }>;
+  ProjectContacts?: Array<{
+    ContactId?: number;
+    ProjectId?: number;
+    ContactName?: string | null;
+    ContactTypeId?: number;
+    Title?: string | null;
+    Email?: string | null;
+    Phone?: string | null;
+  }>;
+};
+
+type EmployeeSuggestion = {
+  EmployeeId: string;
+  EmployeeName: string;
+};
+
+type ProjectResourceDraft = {
+  resourceName: string;
+  employeeId: string | null;
+  title: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+  reportingManager: string;
+  reportingManagerTitle: string;
+  suggestions: EmployeeSuggestion[];
+  showSuggestions: boolean;
+  isSearching: boolean;
+};
+
+type ProjectContactDraft = {
+  contactName: string;
+  title: string;
+  email: string;
+  phone: string;
 };
 
 type Lead = {
@@ -166,8 +214,10 @@ export default function LeadDetailsClient({
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectFormMode, setProjectFormMode] = useState<"add" | "edit">("add");
   const [projectActionLoading, setProjectActionLoading] = useState<number | null>(null);
+  const [isProjectOngoing, setIsProjectOngoing] = useState(false);
   const [projectForm, setProjectForm] = useState({
     ProjectId: null as number | null,
+    ProjectCode: "",
     ProjectName: "",
     ProjectDesc: "",
     TechStack: "",
@@ -178,9 +228,20 @@ export default function LeadDetailsClient({
     StartDate: "",
     EndDate: "",
   });
+  const [projectContactsInput, setProjectContactsInput] = useState<ProjectContactDraft[]>([]);
+  const [projectResourcesInput, setProjectResourcesInput] = useState<ProjectResourceDraft[]>([]);
+  const [opportunityProjectSearch, setOpportunityProjectSearch] = useState("");
+  const [autoPrefilledOppContacts, setAutoPrefilledOppContacts] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showProjectSummary, setShowProjectSummary] = useState(false);
   const [projectSummaryLoading, setProjectSummaryLoading] = useState(false);
+  const [projectSummaryAccordions, setProjectSummaryAccordions] = useState({
+    techStack: true,
+    keyWork: true,
+    valueAdded: true,
+    deliverables: true,
+    challenges: true,
+  });
 
 
 
@@ -237,6 +298,7 @@ export default function LeadDetailsClient({
   const [leadStatuses, setLeadStatuses] = useState<any[]>([]);
   const [engagementModels, setEngagementModels] = useState<any[]>([]);
   const [Services, setServices] = useState<any[]>([]);
+  const [probabilities, setProbabilities] = useState<any[]>([]);
 
   useEffect(() => {
     fetch("/api/masters/others")
@@ -256,6 +318,9 @@ export default function LeadDetailsClient({
 
         if (Array.isArray(data?.services)) {
           setServices(data.services);
+        }
+        if (Array.isArray(data?.probabilities)) {
+          setProbabilities(data.probabilities);
         }
       });
   }, []);
@@ -333,23 +398,70 @@ export default function LeadDetailsClient({
     Notification: "",
   });
 
+  const toSqlDateTime = (input: string): string => {
+    if (!input) return "";
+    const normalized = input.includes("T") ? input.replace("T", " ") : input;
+    return normalized.length === 16 ? `${normalized}:00` : normalized;
+  };
+
   const resetOpportunityForm = () => {
     setOpportunityForm({
+      projectId: "",
       serviceId: "",
       probabilityId: "",
       statusId: "",
       engagementId: "",
       technologies: [],
     });
+    setOpportunityProjectSearch("");
+    setAutoPrefilledOppContacts(false);
   };
 
   const [opportunityForm, setOpportunityForm] = useState({
+    projectId: "" as number | "",
     serviceId: "" as number | "",
     statusId: "" as number | "",
     probabilityId: "" as number | "",
     engagementId: "" as number | "",
     technologies: [] as number[],
   });
+
+  const closedWonStatusIds = opportunityStatuses
+    .filter((s) =>
+      typeof s.Opportunities_StatusName === "string" &&
+      ["closed won", "won", "done", "completed"].some((value) =>
+        s.Opportunities_StatusName.trim().toLowerCase().includes(value)
+      )
+    )
+    .map((s) => s.Opportunity_StatusId);
+  const closedWonStatusId = closedWonStatusIds.length ? closedWonStatusIds[0] : null;
+  const isClosedWonStatusSelected =
+    opportunityForm.statusId !== "" &&
+    closedWonStatusIds.includes(opportunityForm.statusId as number);
+  const isHundredPercentProbabilitySelected = (() => {
+    const selectedProbabilityId = Number(opportunityForm.probabilityId);
+    if (!selectedProbabilityId || Number.isNaN(selectedProbabilityId)) return false;
+
+    const source =
+      Array.isArray(probabilities) && probabilities.length > 0
+        ? probabilities.map((p) => ({
+          id: Number(p.ProbabilityId),
+          label: String(p.ProbabilityRange || "").trim(),
+        }))
+        : [
+          { id: 1, label: "<25%" },
+          { id: 2, label: "50%" },
+          { id: 3, label: "75%" },
+          { id: 4, label: "90%" },
+          { id: 5, label: "100%" },
+        ];
+
+    const selected = source.find((p) => p.id === selectedProbabilityId);
+    if (!selected) return false;
+
+    return /100\s*%/.test(selected.label);
+  })();
+  const hasSelectedProject = typeof opportunityForm.projectId === "number";
 
   const handleAddOpportunityClick = () => {
     setMode("add");
@@ -489,7 +601,7 @@ export default function LeadDetailsClient({
   };
 
   const formatDateTime = (value?: string) => {
-    return formatLocaleDate(value, undefined, "—");
+    return formatLocaleDateTime(value, undefined, "—");
   };
 
   const toDisplayValue = (value?: string | null) => {
@@ -508,9 +620,99 @@ export default function LeadDetailsClient({
       .filter(Boolean);
   };
 
+  const getProjectTeamMembers = () => {
+    if (!selectedProject?.TeamMembers || !Array.isArray(selectedProject.TeamMembers)) {
+      return [] as Array<{ EmployeeId?: number | string; EmployeeName?: string | null }>;
+    }
+
+    return selectedProject.TeamMembers.filter((member) => {
+      const name = member?.EmployeeName;
+      return typeof name === "string" && name.trim().length > 0;
+    });
+  };
+
+  const getProjectContacts = () => {
+    if (!selectedProject?.ProjectContacts || !Array.isArray(selectedProject.ProjectContacts)) {
+      return [] as Array<{
+        ContactId?: number;
+        ProjectId?: number;
+        ContactName?: string | null;
+        ContactTypeId?: number;
+        Title?: string | null;
+        Email?: string | null;
+        Phone?: string | null;
+      }>;
+    }
+
+    return selectedProject.ProjectContacts.filter((contact) => {
+      const name = contact?.ContactName;
+      return typeof name === "string" && name.trim().length > 0;
+    });
+  };
+
+  const getMemberField = (member: any, keys: string[]) => {
+    for (const key of keys) {
+      const value = member?.[key];
+      if (value !== undefined && value !== null && String(value).trim().length > 0) {
+        return String(value).trim();
+      }
+    }
+    return "";
+  };
+
+  const isOngoingValue = (value?: string | null) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return true;
+    return ["ongoing", "active", "current", "present", "open"].includes(normalized);
+  };
+
+  const oldProjectTeamMembers = getProjectTeamMembers().filter((member: any) => {
+    const endDate = getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]);
+    return endDate.length > 0 && !isOngoingValue(endDate);
+  });
+
+  const newProjectTeamMembers = getProjectTeamMembers().filter((member: any) => {
+    const endDate = getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]);
+    return endDate.length === 0 || isOngoingValue(endDate);
+  });
+
+  const formatMemberDate = (value?: string | null, fallback = "Ongoing") => {
+    if (!value || isOngoingValue(value)) return fallback;
+    return formatProjectDate(value);
+  };
+
+  const toggleProjectSummaryAccordion = (
+    key: "techStack" | "keyWork" | "valueAdded" | "deliverables" | "challenges"
+  ) => {
+    setProjectSummaryAccordions((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const resetProjectSummaryAccordions = () => {
+    setProjectSummaryAccordions({
+      techStack: true,
+      keyWork: true,
+      valueAdded: true,
+      deliverables: true,
+      challenges: true,
+    });
+  };
+
   const formatProjectDate = (value?: string | null) => {
     if (!value) return "Not Available";
     return formatLocaleDate(value, undefined, "Not Available");
+  };
+
+  const getProjectStartDateDisplay = (project?: { StartDate?: string | null } | null) => {
+    return formatProjectDate(project?.StartDate ?? selectedProject?.StartDate ?? null);
+  };
+
+  const getProjectEndDateDisplay = (project?: { EndDate?: string | null } | null) => {
+    const endDate = project?.EndDate ?? selectedProject?.EndDate ?? null;
+    if (!endDate) return "Ongoing";
+    return formatProjectDate(endDate);
   };
 
   const formatPointsForEditor = (value?: string | null) => {
@@ -532,6 +734,7 @@ export default function LeadDetailsClient({
   const resetProjectForm = () => {
     setProjectForm({
       ProjectId: null,
+      ProjectCode: "",
       ProjectName: "",
       ProjectDesc: "",
       TechStack: "",
@@ -542,6 +745,162 @@ export default function LeadDetailsClient({
       StartDate: "",
       EndDate: "",
     });
+    setIsProjectOngoing(false);
+    setProjectContactsInput([]);
+    setProjectResourcesInput([]);
+  };
+
+  const mapTeamMembersToResourceDrafts = (
+    teamMembers?: Array<{
+      EmployeeId?: number | string;
+      EmployeeName?: string | null;
+      Title?: string | null;
+      StartDate?: string | null;
+      EndDate?: string | null;
+      ReportingManager?: string | null;
+      ReportingManagerTitle?: string | null;
+    }>
+  ): ProjectResourceDraft[] => {
+    if (!Array.isArray(teamMembers)) return [];
+
+    return teamMembers
+      .map((member) => {
+        const employeeId =
+          member?.EmployeeId === null || member?.EmployeeId === undefined
+            ? null
+            : String(member.EmployeeId);
+        const employeeName = String(member?.EmployeeName ?? "").trim();
+
+        return {
+          resourceName: employeeName || employeeId || "",
+          employeeId,
+          title: String((member as any)?.Title ?? "").trim(),
+          startDate: member?.StartDate ? String(member.StartDate).split("T")[0] : "",
+          endDate: member?.EndDate ? String(member.EndDate).split("T")[0] : "",
+          isCurrent:
+            !member?.EndDate ||
+            isOngoingValue(String((member as any)?.EndDate ?? "").trim()),
+          reportingManager: String((member as any)?.ReportingManager ?? "").trim(),
+          reportingManagerTitle: String((member as any)?.ReportingManagerTitle ?? "").trim(),
+          suggestions: [],
+          showSuggestions: false,
+          isSearching: false,
+        };
+      })
+      .filter((resource) => resource.resourceName.length > 0);
+  };
+
+  const mapProjectContactsToInput = (
+    contacts?: Array<{
+      ContactName?: string | null;
+      Title?: string | null;
+      Email?: string | null;
+      Phone?: string | null;
+    }>
+  ): ProjectContactDraft[] => {
+    if (!Array.isArray(contacts)) return [];
+    return contacts
+      .map((contact) => ({
+        contactName: String(contact?.ContactName ?? "").trim(),
+        title: String((contact as any)?.Title ?? "").trim(),
+        email: String((contact as any)?.Email ?? "").trim(),
+        phone: String((contact as any)?.Phone ?? "").trim(),
+      }))
+      .filter((contact) => contact.contactName.length > 0);
+  };
+
+  const updateProjectResourceAt = (
+    index: number,
+    updater: (prev: ProjectResourceDraft) => ProjectResourceDraft
+  ) => {
+    setProjectResourcesInput((prev) =>
+      prev.map((item, idx) => (idx === index ? updater(item) : item))
+    );
+  };
+
+  const fetchEmployeeSuggestions = async (index: number, keyword: string) => {
+    if (!effectiveLeadId) return;
+    const term = keyword.trim();
+
+    if (term.length < 2) {
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+        isSearching: false,
+      }));
+      return;
+    }
+
+    updateProjectResourceAt(index, (prev) => ({ ...prev, isSearching: true }));
+
+    try {
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?employeeSearch=${encodeURIComponent(
+          term
+        )}`
+      );
+
+      if (!res.ok) {
+        updateProjectResourceAt(index, (prev) => ({
+          ...prev,
+          suggestions: [],
+          showSuggestions: false,
+          isSearching: false,
+        }));
+        return;
+      }
+
+      const data = await res.json();
+      const suggestions = Array.isArray(data) ? data : [];
+
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions,
+        showSuggestions: suggestions.length > 0,
+        isSearching: false,
+      }));
+    } catch {
+      updateProjectResourceAt(index, (prev) => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+        isSearching: false,
+      }));
+    }
+  };
+
+  const prefillOpportunityFromProject = async (projectId: number) => {
+    if (!effectiveLeadId || mode !== "add") return;
+
+    try {
+      const res = await fetch(
+        `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${projectId}`
+      );
+
+      if (!res.ok) return;
+
+      const projectData: Project = await res.json();
+      const prefills = (projectData?.ProjectContacts || [])
+        .map((contact) => ({
+          FullName: String((contact as any)?.ContactName ?? "").trim(),
+          WorkEmail: String((contact as any)?.Email ?? "").trim(),
+          JobTitle: String((contact as any)?.Title ?? "").trim(),
+          MobilePhone: String((contact as any)?.Phone ?? "").trim(),
+        }))
+        .filter((contact) => contact.FullName.length > 0)
+        .map((contact) => ({
+          ...EMPTY_OPP_CONTACT_FORM,
+          ...contact,
+        }));
+
+      if (prefills.length > 0) {
+        setOppContacts(prefills);
+        setAutoPrefilledOppContacts(true);
+      }
+    } catch {
+      // no-op
+    }
   };
 
   const openAddProjectForm = () => {
@@ -550,10 +909,22 @@ export default function LeadDetailsClient({
     setShowProjectForm(true);
   };
 
-  const openEditProjectForm = (project: Project) => {
+  const openProjectFormById = async (projectId: number) => {
+    if (!effectiveLeadId || !projectId) return;
+
+    const res = await fetch(
+      `/api/employees/leads/${Number(effectiveLeadId)}/projects?projectId=${projectId}`
+    );
+
+    if (!res.ok) {
+      throw new Error("Failed to load project details");
+    }
+
+    const project: Project = await res.json();
     setProjectFormMode("edit");
     setProjectForm({
       ProjectId: project.ProjectId,
+      ProjectCode: project.ProjectCode || "",
       ProjectName: project.ProjectName || "",
       ProjectDesc: project.ProjectDesc || "",
       TechStack: project.TechStack || "",
@@ -564,7 +935,16 @@ export default function LeadDetailsClient({
       StartDate: project.StartDate ? String(project.StartDate).split("T")[0] : "",
       EndDate: project.EndDate ? String(project.EndDate).split("T")[0] : "",
     });
+    setIsProjectOngoing(!project.EndDate);
+    setProjectContactsInput(mapProjectContactsToInput(project.ProjectContacts));
+    setProjectResourcesInput(mapTeamMembersToResourceDrafts(project.TeamMembers));
     setShowProjectForm(true);
+  };
+
+  const openEditProjectForm = (project: Project) => {
+    openProjectFormById(project.ProjectId).catch((error: any) => {
+      alert(error?.message || "Failed to load project details");
+    });
   };
 
   const fetchProjectsForLead = async (status: "all" | "active" | "hidden" = projectStatusFilter) => {
@@ -588,11 +968,32 @@ export default function LeadDetailsClient({
       setProjectActionLoading(projectForm.ProjectId ?? -1);
 
       const method = projectFormMode === "add" ? "POST" : "PUT";
+      const normalizedProjectContacts = projectContactsInput
+        .map((contact) => ({
+          contactName: String(contact?.contactName || "").trim(),
+          title: String(contact?.title || "").trim() || null,
+          email: String(contact?.email || "").trim() || null,
+          phone: String(contact?.phone || "").trim() || null,
+        }))
+        .filter((contact) => contact.contactName.length > 0);
+      const normalizedProjectResources = projectResourcesInput
+        .map((resource) => ({
+          resourceName: String(resource.resourceName || "").trim(),
+          employeeId: resource.employeeId,
+          title: String(resource.title || "").trim() || null,
+          startDate: String(resource.startDate || "").trim() || null,
+          endDate: resource.isCurrent ? null : String(resource.endDate || "").trim() || null,
+          reportingManager: String(resource.reportingManager || "").trim() || null,
+          reportingManagerTitle: String(resource.reportingManagerTitle || "").trim() || null,
+        }))
+        .filter((resource) => resource.resourceName.length > 0);
+
       const res = await fetch(`/api/employees/leads/${Number(effectiveLeadId)}/projects`, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(projectFormMode === "edit" ? { ProjectId: projectForm.ProjectId } : {}),
+          ProjectCode: projectForm.ProjectCode.trim() || null,
           ProjectName: projectForm.ProjectName,
           ProjectDesc: projectForm.ProjectDesc || null,
           TechStack: projectForm.TechStack || null,
@@ -601,7 +1002,9 @@ export default function LeadDetailsClient({
           Deliverables: normalizePointsFromEditor(projectForm.Deliverables),
           Challenges: normalizePointsFromEditor(projectForm.Challenges),
           StartDate: projectForm.StartDate || null,
-          EndDate: projectForm.EndDate || null,
+          EndDate: isProjectOngoing ? null : projectForm.EndDate || null,
+          ProjectContacts: normalizedProjectContacts,
+          ProjectResources: normalizedProjectResources,
         }),
       });
 
@@ -663,6 +1066,7 @@ export default function LeadDetailsClient({
 
       const project = await res.json();
       setSelectedProject(project || null);
+      resetProjectSummaryAccordions();
       setShowProjectSummary(true);
     } catch (err) {
       console.error("Failed to load project details:", err);
@@ -691,7 +1095,7 @@ export default function LeadDetailsClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ReminderDate: reminderForm.ReminderDate,
+          ReminderDate: toSqlDateTime(reminderForm.ReminderDate),
           Notes: reminderForm.Notes,
           Status: reminderForm.Status,
           Notification: reminderForm.Notification,
@@ -747,6 +1151,7 @@ export default function LeadDetailsClient({
           Notes: field === "Notes" ? value : activity.Notes,
           Status: field === "Status" ? value : activity.Status,
           ActivityDate: field === "ActivityDate" ? value : activity.ActivityDate,
+          ContactId: field === "ContactId" ? value : (activity.ContactId ?? null),
         }),
       });
 
@@ -805,12 +1210,15 @@ export default function LeadDetailsClient({
 
     /* 2️⃣ SET OPPORTUNITY FORM */
     setOpportunityForm({
+      projectId: oppData.ProjectId ?? "",
       serviceId: oppData.ServiceId,
       statusId: oppData.StatusId,
       probabilityId: oppData.ProbabilityId,
       engagementId: oppData.EngagementId,
       technologies: oppData.TechnologyIds || [],
     });
+    setOpportunityProjectSearch(oppData.ProjectName || "");
+    setAutoPrefilledOppContacts(false);
 
     setOriginalTechnologies(oppData.TechnologyIds || []);
 
@@ -886,7 +1294,9 @@ export default function LeadDetailsClient({
     ).join(", ");
   };
 
-  const handleSaveOpportunity = async () => {
+  const handleSaveOpportunity = async (
+    options?: { keepOpen?: boolean; markComplete?: boolean }
+  ): Promise<{ OpportunityId: number | null; savedOpportunity: any } | null> => {
     const isEdit = mode === "edit";
 
     const id = effectiveLeadId ?? leadId;
@@ -898,22 +1308,22 @@ export default function LeadDetailsClient({
       !opportunityForm.engagementId
     ) {
       alert("Please fill all required opportunity fields");
-      return;
+      return null;
     }
 
     if (!id) {
       alert("Invalid Lead selected");
-      return;
+      return null;
     }
 
     if (isEdit && !currentOpportunityId) {
       alert("Opportunity ID missing");
-      return;
+      return null;
     }
 
     if (opportunityForm.technologies.length === 0) {
       alert("Please select at least one Technology");
-      return;
+      return null;
     }
 
     const otherSelected = categories
@@ -936,7 +1346,7 @@ export default function LeadDetailsClient({
     for (const id of otherIds) {
       if (!otherTechnologyMap[id]?.trim()) {
         alert("Please specify all selected Other technologies");
-        return;
+        return null;
       }
     }
 
@@ -946,6 +1356,8 @@ export default function LeadDetailsClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...(isEdit && { OpportunityId: currentOpportunityId }),
+
+        projectId: opportunityForm.projectId,
 
         serviceId: opportunityForm.serviceId,
         statusId: opportunityForm.statusId,
@@ -957,6 +1369,7 @@ export default function LeadDetailsClient({
 
         // 🔑 ADD THIS FLAG
         hasOtherTechnology: Object.keys(otherTechnologyMap).length > 0,
+        isComplete: options?.markComplete ? 1 : undefined,
 
         OpportunityContact: buildOppContactSummary(),
       }),
@@ -966,7 +1379,7 @@ export default function LeadDetailsClient({
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       alert(err.error || "Failed to save opportunity");
-      return;
+      return null;
     }
 
     // 2 READ RESPONSE
@@ -1002,6 +1415,8 @@ export default function LeadDetailsClient({
             o.OpportunityId === OpportunityId
               ? {
                 ...o,
+                ProjectId: savedOpportunity.ProjectId,
+                ProjectName: savedOpportunity.ProjectName,
                 Service: savedOpportunity.Service,
                 Probability: savedOpportunity.Probability,
                 Status: savedOpportunity.Status,
@@ -1028,12 +1443,46 @@ export default function LeadDetailsClient({
       };
     });
 
-    // 5 RESET & CLOSE
-    setShowAddOpportunity(false);
-    setMode("add");
+    // 5 RESET & CLOSE OPPORTUNITY MODAL
+    if (!options?.keepOpen) {
+      setShowAddOpportunity(false);
+      setMode("add");
+    }
 
     if (isEdit) {
       await fetchLeadDetails();
+    }
+
+    return { OpportunityId, savedOpportunity };
+  };
+
+  const handleConvertOpportunityToProject = async () => {
+    if (!effectiveLeadId) return;
+
+    const saveResult = await handleSaveOpportunity({ keepOpen: true, markComplete: true });
+    if (!saveResult) return;
+
+    let projectId =
+      typeof opportunityForm.projectId === "number"
+        ? opportunityForm.projectId
+        : saveResult.savedOpportunity?.ProjectId ?? null;
+
+    try {
+      if (!projectId) {
+        setShowAddOpportunity(false);
+        setMode("add");
+        setOpportunityView("OPPORTUNITY");
+        openAddProjectForm();
+        return;
+      }
+
+      await fetchProjectsForLead(projectStatusFilter);
+      await openProjectFormById(Number(projectId));
+      setShowAddOpportunity(false);
+      setMode("add");
+      setOpportunityView("OPPORTUNITY");
+    } catch (error: any) {
+      alert(error?.message || "Failed to open project form");
     }
   };
 
@@ -1255,30 +1704,30 @@ export default function LeadDetailsClient({
     padding: "8px 12px",
     borderRadius: 6,
     border: "none",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#ffffff",
     cursor: "pointer",
     fontWeight: 600,
-    boxShadow: "0 4px 10px rgba(58, 119, 227, 0.25)",
+    boxShadow: "0 4px 10px rgba(242, 101, 34, 0.25)",
   };
 
   const primaryBtn: React.CSSProperties = {
     padding: "9px 14px",
     borderRadius: 8,
     border: "none",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#fff",
     cursor: "pointer",
     fontWeight: 600,
-    boxShadow: "0 8px 18px rgba(58, 119, 227, 0.22)",
+    boxShadow: "0 8px 18px rgba(242, 101, 34, 0.22)",
   };
 
   const secondaryBtn: React.CSSProperties = {
     padding: "8px 12px",
     borderRadius: 8,
-    border: "1px solid #3a77e3",
+    border: "1px solid #F26522",
     background: "#fff",
-    color: "#3a77e3",
+    color: "#F26522",
     cursor: "pointer",
     fontWeight: 600,
   };
@@ -1310,7 +1759,7 @@ export default function LeadDetailsClient({
     border: "1px solid #eef1f4",
     boxShadow: "0 6px 14px rgba(15, 23, 42, 0.05)",
     marginBottom: 12,
-    borderLeft: "4px solid #1e90ff",
+    borderLeft: "4px solid #F26522",
   };
 
   const contactAccentStyle: React.CSSProperties = {
@@ -1346,7 +1795,7 @@ export default function LeadDetailsClient({
   };
 
   const contactLinkStyle: React.CSSProperties = {
-    color: "#2563eb",
+    color: "#1F3A68",
     textDecoration: "none",
     overflowWrap: "anywhere",
   };
@@ -1440,7 +1889,7 @@ export default function LeadDetailsClient({
   };
 
   const addBtn = {
-    backgroundColor: "#3a77e3",
+    backgroundColor: "#F26522",
     color: "white",
     width: 24,
     height: 24,
@@ -1479,7 +1928,7 @@ export default function LeadDetailsClient({
   };
 
   const modalHeader: React.CSSProperties = {
-    background: "#3a77e3",
+    background: "#F26522",
     color: "white",
     padding: "14px 20px",
     fontSize: 15,
@@ -1539,7 +1988,7 @@ export default function LeadDetailsClient({
 
   const saveBtn: React.CSSProperties = {
     padding: "8px 15px",
-    background: "#3a77e3",
+    background: "#F26522",
     color: "#fff",
     borderRadius: 4,
     border: "none",
@@ -1609,7 +2058,7 @@ export default function LeadDetailsClient({
                     style={{
                       ...dropdownItem,
                       backgroundColor: hoveredItem === "prospect" ? "#f1f5f9" : "#fff",
-                      color: hoveredItem === "prospect" ? "#2563eb" : "#333",
+                      color: hoveredItem === "prospect" ? "#1F3A68" : "#333",
                       cursor: "pointer",
                       transform: hoveredItem === "prospect" ? "scale(1.03)" : "scale(1)",
                       transition: "all 0.15s ease",
@@ -1625,7 +2074,7 @@ export default function LeadDetailsClient({
                     style={{
                       ...dropdownItem,
                       backgroundColor: hoveredItem === "account" ? "#f1f5f9" : "#fff",
-                      color: hoveredItem === "account" ? "#2563eb" : "#333",
+                      color: hoveredItem === "account" ? "#1F3A68" : "#333",
                       cursor: "pointer",
                       transform: hoveredItem === "account" ? "scale(1.03)" : "scale(1)",
                       transition: "all 0.15s ease",
@@ -1710,8 +2159,9 @@ export default function LeadDetailsClient({
             <span
               style={{
                 padding: "2px 8px",
-                background: "#e8f3ff",
+                background: "#eef2f7",
                 borderRadius: 12,
+                color: "#1F3A68",
               }}
             >
               {lead.StatusName}
@@ -1780,11 +2230,11 @@ export default function LeadDetailsClient({
                       ...contactCardStyle,
                       cursor: "pointer",
                       borderLeft: isSelected
-                        ? "4px solid #1e90ff"
+                        ? "4px solid #F26522"
                         : "4px solid #cbd8ea",
-                      background: isSelected ? "#eef5ff" : "#fff",
+                      background: isSelected ? "#fff4ee" : "#fff",
                       boxShadow: isSelected
-                        ? "0 0 0 2px #1e90ff44"
+                        ? "0 0 0 2px rgba(242, 101, 34, 0.25)"
                         : "0 1px 3px rgba(0,0,0,0.06)",
                       transition: "all 0.15s ease",
                     }}
@@ -1816,7 +2266,7 @@ export default function LeadDetailsClient({
                       {c.ContactEmail && (
                         <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 10 }}>
                           <div style={contactRowLabel}>Email:</div>
-                          <div style={{ fontSize: 13, color: "#3a77e3", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <div style={{ fontSize: 13, color: "#F26522", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             <a
                               href={`mailto:${c.ContactEmail}`}
                               title={c.ContactEmail}
@@ -1847,7 +2297,7 @@ export default function LeadDetailsClient({
                                   { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ EmailSent: newVal }) }
                                 );
                               }}
-                              style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                              style={{ accentColor: "#F26522", cursor: "pointer" }}
                             />
                             Email Sent
                           </label>
@@ -1858,7 +2308,7 @@ export default function LeadDetailsClient({
                         <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6, gap: 10 }}>
                           <div style={contactRowLabel}>LinkedIn:</div>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, color: "#3a77e3", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <div style={{ fontSize: 13, color: "#F26522", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               <a
                                 href={`https://${c.LinkedInProfile}`}
                                 target="_blank"
@@ -1899,7 +2349,7 @@ export default function LeadDetailsClient({
                                         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: newVal }) }
                                       );
                                     }}
-                                    style={{ accentColor: "#1e90ff", cursor: "pointer" }}
+                                    style={{ accentColor: "#F26522", cursor: "pointer" }}
                                   />
                                   {label}
                                 </label>
@@ -1921,7 +2371,7 @@ export default function LeadDetailsClient({
                               padding: "5px 14px",
                               fontSize: 12,
                               fontWeight: 600,
-                              background: "#1e90ff",
+                              background: "#F26522",
                               color: "#fff",
                               border: "none",
                               borderRadius: 5,
@@ -2059,7 +2509,54 @@ export default function LeadDetailsClient({
                 </td>
 
                 {/* Contact */}
-                <td style={tdStyle}>{a.ContactName || "—"}</td>
+                <td
+                  style={tdStyle}
+                  onClick={() => setEditingCell(`act-contact-${a.ActivityId}`)}
+                >
+                  {editingCell === `act-contact-${a.ActivityId}` ? (
+                    <select
+                      autoFocus
+                      style={inputBox}
+                      defaultValue={
+                        a.ContactId !== null && a.ContactId !== undefined
+                          ? String(a.ContactId)
+                          : ""
+                      }
+                      onBlur={(e) => {
+                        const selectedValue = e.target.value
+                          ? Number(e.target.value)
+                          : null;
+                        
+                        if (isValueChanged(a.ContactId ?? null, selectedValue)) {
+                          autoSaveActivityField(i, "ContactId", selectedValue);
+                        }
+                        setEditingCell(null);
+                      }}
+                      onChange={(e) => {
+                        const selectedValue = e.target.value
+                          ? Number(e.target.value)
+                          : null;
+
+                        if (isValueChanged(a.ContactId ?? null, selectedValue)) {
+                          autoSaveActivityField(i, "ContactId", selectedValue);
+                        }
+                        // Don't setEditingCell(null) here - let onBlur handle closing
+                      }}
+                    >
+                      <option value="">-- Select Contact --</option>
+                      {(lead.Contacts || []).map((contact) => (
+                        <option
+                          key={contact.LeadContactID}
+                          value={contact.LeadContactID ?? ""}
+                        >
+                          {contact.ContactName || "Unnamed contact"}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    a.ContactName || "—"
+                  )}
+                </td>
 
                 {/* Status */}
                 <td
@@ -2091,9 +2588,11 @@ export default function LeadDetailsClient({
       {/* Reminders */}
       <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
         Reminders
-        <button style={addBtn} onClick={() => setShowAddReminder(true)}>
-          +
-        </button>
+        <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
+          <button style={addBtn} onClick={() => setShowAddReminder(true)}>
+            + 
+          </button>
+        </div>
       </div>
       <div style={tableWrap}>
         <table
@@ -2210,6 +2709,7 @@ export default function LeadDetailsClient({
         >
           <thead>
             <tr>
+              <th style={{ ...thStyle, width: 180 }}>Project</th>
               <th style={{ ...thStyle, width: 150 }}>Service</th>
               <th style={{ ...thStyle, width: 120 }}>Probability</th>
               <th style={{ ...thStyle, width: 200 }}>Status</th>
@@ -2226,6 +2726,7 @@ export default function LeadDetailsClient({
                 style={{ cursor: "pointer" }}
                 onClick={() => handleEditOpportunity(o)}
               >
+                <td style={tdStyle}>{o.ProjectName || "-"}</td>
                 <td style={tdStyle}>{o.Service}</td>
                 <td style={tdStyle}>{o.Probability}</td>
                 <td style={tdStyle}>{o.Status}</td>
@@ -2261,7 +2762,7 @@ export default function LeadDetailsClient({
 
             {(!lead.Opportunities || lead.Opportunities.length === 0) && (
               <tr>
-                <td colSpan={5} style={tdStyle}>
+                <td colSpan={7} style={tdStyle}>
                   No opportunities
                 </td>
               </tr>
@@ -2389,12 +2890,12 @@ export default function LeadDetailsClient({
                         style={{ cursor: "pointer" }}
                         onClick={() => handleOpenProjectSummary(p.ProjectId)}
                       >
-                        <td style={{ ...tdStyle, color: "#1d4ed8", fontWeight: 600 }}>
+                        <td style={{ ...tdStyle, color: "#1F3A68", fontWeight: 600 }}>
                           {p.ProjectName}
                         </td>
                         {/* <td style={tdStyle}>{p.CompanyName}</td> */}
-                        <td style={tdStyle}>{p.StartDate || "—"}</td>
-                        <td style={tdStyle}>{p.EndDate || "—"}</td>
+                        <td style={tdStyle}>{getProjectStartDateDisplay(p)}</td>
+                        <td style={tdStyle}>{getProjectEndDateDisplay(p)}</td>
                         <td style={tdStyle}>
                           <span
                             style={{
@@ -2409,15 +2910,15 @@ export default function LeadDetailsClient({
                             {p.Status || "Active"}
                           </span>
                         </td>
-                        <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
                             <button
                               type="button"
                               onClick={() => openEditProjectForm(p)}
                               style={{
-                                border: "1px solid #93c5fd",
-                                background: "#eff6ff",
-                                color: "#1d4ed8",
+                                border: "1px solid rgba(31, 58, 104, 0.28)",
+                                background: "#eef2f7",
+                                color: "#1F3A68",
                                 borderRadius: 6,
                                 padding: "4px 9px",
                                 fontSize: 12,
@@ -2456,23 +2957,34 @@ export default function LeadDetailsClient({
             </div>
           )}
 
-          {showProjectSummary && selectedProject && (
-            <div style={{ ...modalOverlay, zIndex: 10001 }} onClick={() => setShowProjectSummary(false)}>
+          {showProjectSummary && selectedProject && typeof window !== "undefined" &&
+            createPortal(
               <div
                 style={{
-                  background: "#f8fafc",
-                  width: "min(1200px, 78vw)",
-                  maxHeight: "85vh",
-                  borderRadius: 12,
-                  overflowY: "auto",
-                  border: "1px solid #dbeafe",
-                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                  ...modalOverlay,
+                  zIndex: 10001,
+                  alignItems: "flex-start",
+                  paddingTop: 84,
+                  backdropFilter: "blur(4px)",
+                  WebkitBackdropFilter: "blur(4px)",
                 }}
-                onClick={(e) => e.stopPropagation()}
+                onClick={() => setShowProjectSummary(false)}
               >
                 <div
                   style={{
-                    background: "linear-gradient(90deg, #1d4ed8, #2563eb)",
+                    background: "#f8fafc",
+                    width: "min(1200px, 78vw)",
+                    maxHeight: "85vh",
+                    borderRadius: 12,
+                    overflowY: "auto",
+                    border: "1px solid rgba(31, 58, 104, 0.22)",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                <div
+                  style={{
+                    background: "#1F3A68",
                     color: "#fff",
                     padding: "12px 18px",
                     display: "flex",
@@ -2488,7 +3000,7 @@ export default function LeadDetailsClient({
                       {toDisplayValue(selectedProject.ProjectName)}
                     </div>
                     <div style={{ fontSize: 12, opacity: 0.95, marginTop: 4 }}>
-                      Customer: {toDisplayValue(lead?.CompanyName)} • Status: {toDisplayValue(selectedProject.Status || "Active")} • Start: {formatProjectDate(selectedProject.StartDate)} • End: {selectedProject.EndDate ? formatProjectDate(selectedProject.EndDate) : "Ongoing"}
+                      Customer: {toDisplayValue(lead?.CompanyName)} • Status: {toDisplayValue(selectedProject.Status || "Active")} • Start: {getProjectStartDateDisplay()} • End: {getProjectEndDateDisplay()}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2540,41 +3052,271 @@ export default function LeadDetailsClient({
                       background: "#fff",
                       border: "1px solid #e2e8f0",
                       borderRadius: 10,
-                      padding: "10px 12px",
                       boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
-                      gridColumn: "1 / -1",
+                      overflow: "hidden",
                     }}
                   >
-                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                      Tech Stack
-                    </div>
-                    <div style={{ marginTop: 6, color: "#0f172a", lineHeight: 1.5 }}>
-                      {toDisplayValue(selectedProject.TechStack)}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleProjectSummaryAccordion("techStack")}
+                      aria-expanded={projectSummaryAccordions.techStack}
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        background: "#fff",
+                        padding: "10px 12px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Tech Stack
+                      </span>
+                      <span style={{ color: "#64748b", fontSize: 13 }}>
+                        {projectSummaryAccordions.techStack ? "▲" : "▼"}
+                      </span>
+                    </button>
+
+                    {projectSummaryAccordions.techStack && (
+                      <div style={{ marginTop: -2, padding: "0 12px 10px", color: "#0f172a", lineHeight: 1.5 }}>
+                        {toDisplayValue(selectedProject.TechStack)}
+                      </div>
+                    )}
                   </section>
 
-                  {([
-                    { title: "Key Work", body: toDisplayPoints(selectedProject.KeyWork), Icon: Wrench },
-                    { title: "Value Added", body: toDisplayPoints(selectedProject.ValueAdded), Icon: Star },
-                    { title: "Deliverables", body: toDisplayPoints(selectedProject.Deliverables), Icon: Package },
-                    { title: "Challenges", body: toDisplayPoints(selectedProject.Challenges), Icon: AlertTriangle },
-                  ] as Array<{ title: string; body: string[]; Icon: any }>).map(({ title, body, Icon }) => (
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Project Contact
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#475569",
+                          fontWeight: 600,
+                          background: "#f1f5f9",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 999,
+                          padding: "2px 10px",
+                        }}
+                      >
+                        {getProjectContacts().length} Contact{getProjectContacts().length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+
+                    {getProjectContacts().length > 0 ? (
+                      <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ background: "#f8fafc" }}>
+                                <th style={oppTh}>Contact Name</th>
+                                <th style={oppTh}>Title</th>
+                                <th style={oppTh}>Email</th>
+                                <th style={oppTh}>Phone</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {getProjectContacts().map((contact, index) => (
+                                <tr key={`${contact.ContactId ?? "contact"}-${index}`}>
+                                  <td style={oppTd}>{toDisplayValue(contact.ContactName)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Title || (contact as any).ContactTitle)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Email || (contact as any).ContactEmail)}</td>
+                                  <td style={oppTd}>{toDisplayValue((contact as any).Phone || (contact as any).ContactPhone)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+                        No project contacts added.
+                      </div>
+                    )}
+                  </section>
+
+                  {[{
+                    title: "Old Project Team Members",
+                    members: oldProjectTeamMembers,
+                  }, {
+                    title: "New Project Team Members",
+                    members: newProjectTeamMembers,
+                  }].map((group) => (
                     <section
-                      key={title}
+                      key={group.title}
                       style={{
                         background: "#fff",
                         border: "1px solid #e2e8f0",
                         borderRadius: 10,
                         padding: "10px 12px",
                         boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                        gridColumn: "span 1",
                       }}
                     >
-                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <Icon size={14} />
-                        <span>{title}</span>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          {group.title}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#475569",
+                            fontWeight: 600,
+                            background: "#f1f5f9",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 999,
+                            padding: "2px 10px",
+                          }}
+                        >
+                          {group.members.length} Member{group.members.length === 1 ? "" : "s"}
+                        </div>
                       </div>
-                      {Array.isArray(body) && (
-                        <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20, color: "#0f172a", lineHeight: 1.6 }}>
+
+                      {group.members.length > 0 ? (
+                        <div style={{ marginTop: 8, border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ background: "#f8fafc" }}>
+                                  <th style={oppTh}>Name</th>
+                                  <th style={oppTh}>Title</th>
+                                  <th style={oppTh}>Start Date</th>
+                                  <th style={oppTh}>End Date</th>
+                                  <th style={oppTh}>Reporting Manager</th>
+                                  <th style={oppTh}>Reporting Manager Title</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.members.map((member: any, index) => (
+                                  <tr key={`${member.EmployeeId ?? group.title}-${index}`}>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["EmployeeName", "Name"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["Title", "EmployeeTitle", "Role"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {formatMemberDate(getMemberField(member, ["StartDate", "startDate", "AllocationStartDate"]), "—")}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {formatMemberDate(getMemberField(member, ["EndDate", "endDate", "AllocationEndDate"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(getMemberField(member, ["ReportingManager", "ManagerName"]))}
+                                    </td>
+                                    <td style={oppTd}>
+                                      {toDisplayValue(
+                                        getMemberField(member, ["ReportingManagerTitle", "ManagerTitle"])
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+                          No members available.
+                        </div>
+                      )}
+                    </section>
+                  ))}
+
+                  {([
+                    {
+                      title: "Key Work",
+                      body: toDisplayPoints(selectedProject.KeyWork),
+                      Icon: Wrench,
+                      keyName: "keyWork" as const,
+                    },
+                    {
+                      title: "Value Added",
+                      body: toDisplayPoints(selectedProject.ValueAdded),
+                      Icon: Star,
+                      keyName: "valueAdded" as const,
+                    },
+                    {
+                      title: "Deliverables",
+                      body: toDisplayPoints(selectedProject.Deliverables),
+                      Icon: Package,
+                      keyName: "deliverables" as const,
+                    },
+                    {
+                      title: "Challenges",
+                      body: toDisplayPoints(selectedProject.Challenges),
+                      Icon: AlertTriangle,
+                      keyName: "challenges" as const,
+                    },
+                  ] as Array<{
+                    title: string;
+                    body: string[];
+                    Icon: any;
+                    keyName: "keyWork" | "valueAdded" | "deliverables" | "challenges";
+                  }>).map(({ title, body, Icon, keyName }) => (
+                    <section
+                      key={title}
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 10,
+                        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleProjectSummaryAccordion(keyName)}
+                        aria-expanded={projectSummaryAccordions[keyName]}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background: "#fff",
+                          padding: "10px 12px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Icon size={14} />
+                          <span>{title}</span>
+                        </span>
+                        <span style={{ color: "#64748b", fontSize: 13 }}>
+                          {projectSummaryAccordions[keyName] ? "▲" : "▼"}
+                        </span>
+                      </button>
+
+                      {projectSummaryAccordions[keyName] && Array.isArray(body) && (
+                        <ul style={{ marginTop: -2, marginBottom: 10, paddingLeft: 32, paddingRight: 12, color: "#0f172a", lineHeight: 1.6 }}>
                           {body.map((point, index) => (
                             <li key={`${title}-${index}`}>{point}</li>
                           ))}
@@ -2609,9 +3351,10 @@ export default function LeadDetailsClient({
                     </button>
                   </section>
                 </div>
-              </div>
-            </div>
-          )}
+                </div>
+              </div>,
+              document.body
+            )}
 
           {showProjectForm && (
             <div style={{ ...modalOverlay, zIndex: 10002 }} onClick={() => setShowProjectForm(false)}>
@@ -2622,7 +3365,7 @@ export default function LeadDetailsClient({
                   maxHeight: "86vh",
                   overflowY: "auto",
                   borderRadius: 10,
-                  border: "1px solid #dbeafe",
+                  border: "1px solid rgba(31, 58, 104, 0.22)",
                   boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -2631,7 +3374,13 @@ export default function LeadDetailsClient({
                   {projectFormMode === "add" ? "Add Project" : "Edit Project"}
                 </div>
 
-                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <input
+                    style={{ ...inputBox, width: "100%" }}
+                    placeholder="Project Code"
+                    value={projectForm.ProjectCode}
+                    onChange={(e) => setProjectForm((prev) => ({ ...prev, ProjectCode: e.target.value }))}
+                  />
                   <input
                     style={{ ...inputBox, width: "100%" }}
                     placeholder="Project Name*"
@@ -2693,11 +3442,374 @@ export default function LeadDetailsClient({
                       <label style={{ ...labelStyle, marginBottom: 4, display: "block" }}>End Date</label>
                       <input
                         type="date"
-                        style={{ ...inputBox, width: "100%" }}
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          background: isProjectOngoing ? "#f1f5f9" : "#fff",
+                          color: isProjectOngoing ? "#94a3b8" : "#0f172a",
+                          cursor: isProjectOngoing ? "not-allowed" : "text",
+                        }}
                         value={projectForm.EndDate}
+                        disabled={isProjectOngoing}
                         onChange={(e) => setProjectForm((prev) => ({ ...prev, EndDate: e.target.value }))}
                       />
                     </div>
+                  </div>
+
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 13,
+                      color: "#334155",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isProjectOngoing}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsProjectOngoing(checked);
+                        if (checked) {
+                          setProjectForm((prev) => ({ ...prev, EndDate: "" }));
+                        }
+                      }}
+                      style={{ accentColor: "#F26522", cursor: "pointer" }}
+                    />
+                    Project still going on (Current)
+                  </label>
+
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ ...labelStyle, marginBottom: 6, display: "block" }}>
+                      Project Contacts
+                    </label>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {projectContactsInput.map((contact, index) => (
+                        <div
+                          key={`project-contact-${index}`}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "2fr 1fr 1.5fr 1fr auto",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder={`Contact Name ${index + 1}`}
+                            value={contact.contactName}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, contactName: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Title"
+                            value={contact.title}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, title: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Email"
+                            value={contact.email}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, email: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            style={{ ...inputBox, width: "100%" }}
+                            placeholder="Phone"
+                            value={contact.phone}
+                            onChange={(e) =>
+                              setProjectContactsInput((prev) =>
+                                prev.map((item, idx) =>
+                                  idx === index
+                                    ? { ...item, phone: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <button
+                            type="button"
+                            style={{ ...cancelBtn, padding: "0 12px", height: 36 }}
+                            onClick={() =>
+                              setProjectContactsInput((prev) =>
+                                prev.filter((_, idx) => idx !== index)
+                              )
+                            }
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      style={{ ...secondaryBtn, marginTop: 8, width: "fit-content" }}
+                      onClick={() =>
+                        setProjectContactsInput((prev) => [
+                          ...prev,
+                          {
+                            contactName: "",
+                            title: "",
+                            email: "",
+                            phone: "",
+                          },
+                        ])
+                      }
+                    >
+                      + Add Project Contact
+                    </button>
+                  </div>
+
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: 6, display: "block" }}>
+                      Project Resources
+                    </label>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {projectResourcesInput.map((resource, index) => (
+                        <div key={`project-resource-${index}`} style={{ position: "relative" }}>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Type resource name (employee suggestion supported)"
+                              value={resource.resourceName}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  resourceName: value,
+                                  employeeId: null,
+                                }));
+                                fetchEmployeeSuggestions(index, value);
+                              }}
+                              onFocus={() => {
+                                if (resource.suggestions.length > 0) {
+                                  updateProjectResourceAt(index, (prev) => ({
+                                    ...prev,
+                                    showSuggestions: true,
+                                  }));
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              style={{ ...cancelBtn, padding: "0 12px", height: 36 }}
+                              onClick={() =>
+                                setProjectResourcesInput((prev) =>
+                                  prev.filter((_, idx) => idx !== index)
+                                )
+                              }
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Title"
+                              value={resource.title}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  title: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              type="date"
+                              style={{ ...inputBox, width: "100%" }}
+                              value={resource.startDate}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  startDate: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              type="date"
+                              style={{
+                                ...inputBox,
+                                width: "100%",
+                                background: resource.isCurrent ? "#f1f5f9" : "#fff",
+                                color: resource.isCurrent ? "#94a3b8" : "#0f172a",
+                                cursor: resource.isCurrent ? "not-allowed" : "text",
+                              }}
+                              value={resource.endDate}
+                              disabled={resource.isCurrent}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  endDate: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 8,
+                              fontSize: 12,
+                              color: "#334155",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={resource.isCurrent}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  isCurrent: e.target.checked,
+                                  endDate: e.target.checked ? "" : prev.endDate,
+                                }))
+                              }
+                              style={{ accentColor: "#F26522", cursor: "pointer" }}
+                            />
+                            Resource currently assigned (Current)
+                          </label>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Reporting Manager"
+                              value={resource.reportingManager}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  reportingManager: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              style={{ ...inputBox, width: "100%" }}
+                              placeholder="Reporting Manager Title"
+                              value={resource.reportingManagerTitle}
+                              onChange={(e) =>
+                                updateProjectResourceAt(index, (prev) => ({
+                                  ...prev,
+                                  reportingManagerTitle: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          {/* {resource.employeeId && (
+                            <div style={{ marginTop: 4, color: "#334155", fontSize: 12 }}>
+                              Mapped Employee ID: {resource.employeeId}
+                            </div>
+                          )} */}
+
+                          {resource.isSearching && (
+                            <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
+                              Searching employees...
+                            </div>
+                          )}
+
+                          {resource.showSuggestions && resource.suggestions.length > 0 && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: "calc(100% + 4px)",
+                                left: 0,
+                                right: 0,
+                                background: "#fff",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: 6,
+                                boxShadow: "0 8px 18px rgba(15, 23, 42, 0.14)",
+                                zIndex: 5,
+                                maxHeight: 190,
+                                overflowY: "auto",
+                              }}
+                            >
+                              {resource.suggestions.map((suggestion, sIndex) => (
+                                <button
+                                  key={`${suggestion.EmployeeId}-${sIndex}`}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    updateProjectResourceAt(index, (prev) => ({
+                                      ...prev,
+                                      resourceName: suggestion.EmployeeName,
+                                      employeeId: suggestion.EmployeeId,
+                                      showSuggestions: false,
+                                    }));
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    border: "none",
+                                    textAlign: "left",
+                                    background: "#fff",
+                                    padding: "8px 10px",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                                    {suggestion.EmployeeName}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                                    ID: {suggestion.EmployeeId}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      style={{ ...secondaryBtn, marginTop: 8, width: "fit-content" }}
+                      onClick={() =>
+                        setProjectResourcesInput((prev) => [
+                          ...prev,
+                          {
+                            resourceName: "",
+                            employeeId: null,
+                            title: "",
+                            startDate: "",
+                            endDate: "",
+                            isCurrent: false,
+                            reportingManager: "",
+                            reportingManagerTitle: "",
+                            suggestions: [],
+                            showSuggestions: false,
+                            isSearching: false,
+                          },
+                        ])
+                      }
+                    >
+                      + Add Project Resource
+                    </button>
                   </div>
                 </div>
 
@@ -2876,7 +3988,7 @@ export default function LeadDetailsClient({
                                 marginBottom: 0,
                                 marginTop: "2px",
                                 textAlign: "left",
-                                background: isSelected ? "#dbeafe" : "transparent",
+                                background: isSelected ? "rgba(31, 58, 104, 0.16)" : "transparent",
                                 color: "#0f172a",
                                 cursor: "pointer",
                                 transition: "background-color 0.15s ease",
@@ -3040,9 +4152,9 @@ export default function LeadDetailsClient({
 
             {/* Body */}
             <div style={modalBody}>
-              <label>Reminder Date*</label>
+              <label>Reminder Date & Time*</label>
               <input
-                type="date"
+                type="datetime-local"
                 style={{ ...inputBox, width: 480 }}
                 value={reminderForm.ReminderDate}
                 onChange={(e) =>
@@ -3160,6 +4272,67 @@ export default function LeadDetailsClient({
                   {/* FIRST ROW - 3 COLUMNS */}
                   <div style={formRow3}>
                     <div style={fieldGroup}>
+                      <label>Project (Optional)</label>
+                      {/* <input
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                        placeholder="Search project by name"
+                        value={opportunityProjectSearch}
+                        onChange={(e) => setOpportunityProjectSearch(e.target.value)}
+                      /> */}
+                      <select
+                        style={{
+                          ...inputBox,
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                        value={opportunityForm.projectId}
+                        onChange={async (e) => {
+                          const value = e.target.value;
+                          const selectedProjectId = value ? Number(value) : "";
+                          const selectedProject = (lead?.Projects || []).find(
+                            (project) => project.ProjectId === selectedProjectId
+                          );
+
+                          setOpportunityForm({
+                            ...opportunityForm,
+                            projectId: selectedProjectId,
+                          });
+                          setOpportunityProjectSearch(selectedProject?.ProjectName || "");
+
+                          if (typeof selectedProjectId === "number") {
+                            await prefillOpportunityFromProject(selectedProjectId);
+                          }
+                        }}
+                      >
+                        <option value="">-- Select Project --</option>
+                        {(lead?.Projects || [])
+                          .filter(
+                            (project) =>
+                              String(project.Status || "Active").toLowerCase() !== "hidden"
+                          )
+                          .filter((project) => {
+                            const search = opportunityProjectSearch.trim().toLowerCase();
+                            if (!search) return true;
+                            return String(project.ProjectName || "")
+                              .toLowerCase()
+                              .includes(search);
+                          })
+                          .map((project) => (
+                            <option key={project.ProjectId} value={project.ProjectId}>
+                              {project.ProjectName}
+                            </option>
+                          ))}
+                      </select>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>
+                        Leave empty for new project opportunities. Select a project only when this opportunity belongs to an existing project.
+                      </div>
+                    </div>
+
+                    <div style={fieldGroup}>
                       <label>Service *</label>
                       <select
                         style={{
@@ -3258,14 +4431,32 @@ export default function LeadDetailsClient({
                         display: "flex",
                         alignItems: "center",
                         gap: 10,
+                        flexWrap: "wrap",
                       }}
                     >
-                      {[
-                        { id: 1, label: "<25%" },
-                        { id: 2, label: "50%" },
-                        { id: 3, label: "75%" },
-                        { id: 4, label: "90%" },
-                      ].map((p) => (
+                      {(() => {
+                        const baseOptions =
+                          Array.isArray(probabilities) && probabilities.length > 0
+                            ? probabilities.map((p) => ({
+                              id: Number(p.ProbabilityId),
+                              label: String(p.ProbabilityRange || "").trim(),
+                            }))
+                            : [
+                              { id: 1, label: "<25%" },
+                              { id: 2, label: "50%" },
+                              { id: 3, label: "75%" },
+                              { id: 4, label: "90%" },
+                            ];
+
+                        const hasHundred = baseOptions.some((p) =>
+                          String(p.label || "").replace(/\s+/g, "").includes("100%")
+                        );
+
+                        const normalizedOptions = hasHundred
+                          ? baseOptions
+                          : [...baseOptions, { id: 5, label: "100%" }];
+
+                        return normalizedOptions.map((p) => (
                         <label
                           key={p.id}
                           style={{
@@ -3289,8 +4480,13 @@ export default function LeadDetailsClient({
                           />
                           {p.label}
                         </label>
-                      ))}
+                      ));
+                      })()}
                     </div>
+                    {/* <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+                      Selecting 90% or higher is usually a strong conversion signal. Use
+                      "Mark as Converted" to make this opportunity Closed Won / Done.
+                    </div> */}
                   </div>
 
                   {/* TECHNOLOGY */}
@@ -3459,6 +4655,12 @@ export default function LeadDetailsClient({
                       </button>
                     </div>
 
+                    {autoPrefilledOppContacts && (
+                      <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                        Opportunity contacts were auto-populated from the selected project. You can edit them before saving.
+                      </div>
+                    )}
+
                     {/* OPPORTUNITY CONTACTS TABLE */}
                     {oppContacts.length > 0 && (
                       <div style={{ marginTop: 12 }}>
@@ -3490,7 +4692,7 @@ export default function LeadDetailsClient({
                                 }}
                               >
                                 <td style={oppTd}>{c.FullName || "—"}</td>
-                                <td style={{ ...oppTd, color: "#2563eb" }}>
+                                <td style={{ ...oppTd, color: "#1F3A68" }}>
                                   {c.WorkEmail || "—"}
                                 </td>
                                 <td style={oppTd}>{c.JobTitle || "—"}</td>
@@ -3508,7 +4710,7 @@ export default function LeadDetailsClient({
                 <>
                   <div
                     style={{
-                      background: "#3a77e3",
+                      background: "#F26522",
                       color: "#fff",
                       padding: "12px 16px",
                       fontWeight: 600,
@@ -4072,8 +5274,16 @@ export default function LeadDetailsClient({
                 </button>
               )}
               {opportunityView === "OPPORTUNITY" && (
-                <button style={saveBtn} onClick={handleSaveOpportunity}>
+                <button style={saveBtn} onClick={() => void handleSaveOpportunity()}>
                   Save Opportunity
+                </button>
+              )}
+              {opportunityView === "OPPORTUNITY" && isHundredPercentProbabilitySelected && (
+                <button
+                  style={{ ...saveBtn, background: "#1F3A68" }}
+                  onClick={() => void handleConvertOpportunityToProject()}
+                >
+                  {hasSelectedProject ? "Convert to Project" : "Add Project"}
                 </button>
               )}
             </div>
@@ -4090,10 +5300,11 @@ const backBtnStyle: React.CSSProperties = {
   padding: "8px 12px",
   borderRadius: 8,
   border: "none",
-  background: "#3a77e3",
+  background: "#F26522",
   color: "#fff",
   fontWeight: 600,
   cursor: "pointer",
+  boxShadow: "0 4px 10px rgba(242, 101, 34, 0.25)",
 };
 
 const oppTh: React.CSSProperties = {
@@ -4117,6 +5328,7 @@ const dropdownItem: React.CSSProperties = {
   textAlign: "left",
   cursor: "pointer",
   borderRadius: "4px",
-  color: "#3a77e3",
+  color: "#F26522",
 };
+
 

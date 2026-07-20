@@ -53,7 +53,7 @@ export default function GlobalAlertProvider({
             position: "fixed",
             inset: 0,
             zIndex: 99999,
-            background: "rgba(15, 23, 42, 0.35)",
+            background: "rgba(15, 31, 61, 0.42)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -65,19 +65,20 @@ export default function GlobalAlertProvider({
               width: "min(460px, 92vw)",
               background: "#ffffff",
               borderRadius: 12,
-              boxShadow: "0 24px 48px rgba(15, 23, 42, 0.28)",
-              border: "1px solid #e2e8f0",
+              boxShadow: "0 24px 48px rgba(15, 31, 61, 0.28)",
+              border: "1px solid rgba(31, 58, 104, 0.16)",
               overflow: "hidden",
             }}
           >
             <div
               style={{
                 padding: "14px 18px",
-                borderBottom: "1px solid #e2e8f0",
+                borderBottom: "1px solid rgba(31, 58, 104, 0.16)",
                 fontSize: 20,
                 fontWeight: 700,
-                color: "#1e40af",
-                letterSpacing: 0.2,
+                color: "#1F3A68",
+                letterSpacing: "-0.02em",
+                fontFamily: "var(--font-display)",
               }}
             >
               Notification
@@ -87,7 +88,7 @@ export default function GlobalAlertProvider({
               style={{
                 padding: "18px",
                 fontSize: 15,
-                color: "#0f172a",
+                color: "#0F1F3D",
                 lineHeight: 1.5,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
@@ -111,7 +112,7 @@ export default function GlobalAlertProvider({
                 style={{
                   border: "none",
                   borderRadius: 8,
-                  background: "#2563eb",
+                  background: "#F26522",
                   color: "#ffffff",
                   fontWeight: 700,
                   fontSize: 14,

@@ -183,33 +183,46 @@ export default function EmployeeList({
       return recordType === type;
     });
 
-    if (!q) return scopedEmployees;
+    const filtered = !q
+      ? scopedEmployees
+      : scopedEmployees.filter((emp) => {
+          const recordType = getRecordType(emp);
+          const haystack = [
+            recordType.label,
+            emp.CompanyName,
+            emp.CompanyLocation,
+            emp.LeadSource,
+            emp.StatusName,
+            emp.OwnerName,
+            emp.CreatedOn,
+            emp.LatestActivityNotes,
+            emp.LeadNotes,
+            ...(emp.Contacts || []).flatMap((c) => [
+              c.ContactName,
+              c.ContactRoleName,
+              c.ContactTitle,
+              c.ContactEmail,
+              c.ContactPhone,
+            ]),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
 
-    return scopedEmployees.filter((emp) => {
-      const recordType = getRecordType(emp);
-      const haystack = [
-        recordType.label,
-        emp.CompanyName,
-        emp.CompanyLocation,
-        emp.LeadSource,
-        emp.StatusName,
-        emp.OwnerName,
-        emp.CreatedOn,
-        emp.LatestActivityNotes,
-        emp.LeadNotes,
-        ...(emp.Contacts || []).flatMap((c) => [
-          c.ContactName,
-          c.ContactRoleName,
-          c.ContactTitle,
-          c.ContactEmail,
-          c.ContactPhone,
-        ]),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+          return haystack.includes(q);
+        });
 
-      return haystack.includes(q);
+    return [...filtered].sort((a, b) => {
+      const bTime = getEntryTime(b);
+      const aTime = getEntryTime(a);
+      const bId = Number(b.LeadId);
+      const aId = Number(a.LeadId);
+
+      if (bTime !== aTime) return bTime - aTime;
+
+      if (Number.isFinite(bId) && Number.isFinite(aId)) return bId - aId;
+
+      return String(b.LeadId).localeCompare(String(a.LeadId));
     });
   }, [employeesList, query, type]);
 
@@ -219,8 +232,8 @@ export default function EmployeeList({
         key: "sent",
         label: "LinkedIn Requests Sent",
         value: analytics.totalLinkedInRequestsSent,
-        iconBg: "#dbeafe",
-        iconColor: "#1d4ed8",
+        iconBg: "rgba(18, 183, 201, 0.12)",
+        iconColor: "#12B7C9",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -233,8 +246,8 @@ export default function EmployeeList({
         key: "accepted",
         label: "LinkedIn Requests Accepted",
         value: analytics.totalLinkedInRequestsAccepted,
-        iconBg: "#dcfce7",
-        iconColor: "#15803d",
+        iconBg: "rgba(31, 58, 104, 0.1)",
+        iconColor: "#1F3A68",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/>
@@ -247,8 +260,8 @@ export default function EmployeeList({
         key: "email",
         label: "Emails Sent",
         value: analytics.totalEmailsSent,
-        iconBg: "#ffedd5",
-        iconColor: "#c2410c",
+        iconBg: "rgba(242, 101, 34, 0.14)",
+        iconColor: "#F26522",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,4 12,13 2,4"/>
@@ -261,8 +274,8 @@ export default function EmployeeList({
         key: "rate",
         label: "LinkedIn Acceptance Rate",
         value: `${analytics.acceptanceRate}%`,
-        iconBg: "#ede9fe",
-        iconColor: "#6d28d9",
+        iconBg: "rgba(15, 31, 61, 0.1)",
+        iconColor: "#0F1F3D",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
@@ -278,7 +291,7 @@ export default function EmployeeList({
   if (error) return <div style={{ color: "red" }}>Error: {error}</div>;
 
   const baseFontStyles: React.CSSProperties = {
-    fontFamily: "Open Sans, sans-serif",
+    fontFamily: "var(--font-body)",
     fontSize: "10px",
     lineHeight: 1.35,
     letterSpacing: "0.2px",
@@ -298,8 +311,8 @@ export default function EmployeeList({
       style={{
         background: "#ffffff",
         borderRadius: 12,
-        boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
-        border: "1px solid #e9eef7",
+        boxShadow: "0 12px 28px rgba(15, 31, 61, 0.08)",
+        border: "1px solid rgba(31, 58, 104, 0.14)",
         overflow: "hidden",
         height: "100%",
         minHeight: 0,
@@ -312,7 +325,7 @@ export default function EmployeeList({
         style={{
           padding: "14px 18px 10px",
           background: "#ffffff",
-          borderBottom: "1px solid #e9eef7",
+          borderBottom: "1px solid rgba(31, 58, 104, 0.14)",
           flexShrink: 0,
         }}
       >
@@ -328,14 +341,14 @@ export default function EmployeeList({
               key={kpi.key}
               title={kpi.tooltip}
               style={{
-                border: "1px solid #e7ecf4",
+                border: "1px solid rgba(31, 58, 104, 0.12)",
                 borderRadius: 10,
                 padding: "9px 10px",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
                 minHeight: 58,
-                background: "linear-gradient(180deg, #ffffff 0%, #f9fbff 100%)",
+                background: "linear-gradient(180deg, #ffffff 0%, #fbf8f4 100%)",
               }}
             >
               <span
@@ -371,7 +384,7 @@ export default function EmployeeList({
                     marginTop: 3,
                     fontSize: 18,
                     fontWeight: 700,
-                    color: "#0f172a",
+                    color: "#0F1F3D",
                     letterSpacing: "0.2px",
                   }}
                 >
@@ -397,7 +410,7 @@ export default function EmployeeList({
           <button
             onClick={onAddLead}
             style={{
-              background: "#3a77e3",
+              background: "#F26522",
               color: "white",
               padding: "7px 12px",
               border: "none",
@@ -415,7 +428,7 @@ export default function EmployeeList({
             <button
               onClick={() => onAddLead2()}
               style={{
-                background: "#3a77e3",
+                background: "#F26522",
                 color: "white",
                 padding: "7px 12px",
                 border: "none",
@@ -460,10 +473,10 @@ export default function EmployeeList({
               paddingLeft: "45px",
               borderRadius: 10,
               border: isSearchFocused
-                ? "1.5px solid #4a90e2"
-                : "1px solid #d8e1ef",
+                ? "1.5px solid #F26522"
+                : "1px solid rgba(31, 58, 104, 0.2)",
               boxShadow: isSearchFocused
-                ? "0 0 8px rgba(8, 40, 218, 0.12)"
+                ? "0 0 0 3px rgba(242, 101, 34, 0.14)"
                 : "none",
               fontSize: "10.05px",
               outline: "none",
@@ -482,7 +495,7 @@ export default function EmployeeList({
           minHeight: 0,
           overflowY: "auto",
           overflowX: "auto",
-          borderTop: "1px solid #edf2fa",
+          borderTop: "1px solid rgba(31, 58, 104, 0.12)",
         }}
       >
         <table
@@ -527,7 +540,7 @@ export default function EmployeeList({
             {filteredEmployees.map((emp, idx) => {
               const rowStyle: React.CSSProperties = {
                 ...trStyle,
-                backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fbff",
+                backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fbf8f4",
               };
               const statusText = emp.StatusName?.trim() || "";
               const latestActivityNote = emp.LatestActivityNotes?.trim() || "";
@@ -538,7 +551,7 @@ export default function EmployeeList({
               return (
                 <tr
                   key={emp.LeadId}
-                  onDoubleClick={() =>
+                  onClick={() =>
                     onOpenLeadDetails?.(emp.LeadId, convertOrigin)
                   }
                   style={{
@@ -622,7 +635,7 @@ export default function EmployeeList({
                             }}
                           >
                             <div
-                              title="Double click to open details"
+                              title="Click to open details"
                               style={{
                                 fontWeight: 700,
                                 color: "#212529",
@@ -690,6 +703,7 @@ export default function EmployeeList({
 
                                 <a
                                   href={`mailto:${c.ContactEmail}`}
+                                  onClick={(e) => e.stopPropagation()}
                                   style={{
                                     color: "#6c7293",
                                     textDecoration: "none",
@@ -726,6 +740,7 @@ export default function EmployeeList({
                                 </span>
                                 <a
                                   href={`tel:${c.ContactPhone}`}
+                                  onClick={(e) => e.stopPropagation()}
                                   style={{
                                     color: "inherit",
                                     textDecoration: "none",
@@ -745,11 +760,11 @@ export default function EmployeeList({
                             style={{
                               marginTop: 4,
                               fontSize: "inherit",
-                              color: "#3a77e3",
+                              color: "#F26522",
                               fontWeight: 600,
                               cursor: "pointer",
                             }}
-                            title="Double-click the row to view all contacts"
+                            title="Click the row to view all contacts"
                           >
                             +{emp.Contacts.length - 2} more
                           </div>
@@ -784,9 +799,9 @@ export default function EmployeeList({
                             maxWidth: "100%",
                             padding: "4px 10px",
                             borderRadius: 12,
-                            border: "1px solid #dbe7ff",
-                            background: "#edf4ff",
-                            color: "#1e40af",
+                            border: "1px solid rgba(31, 58, 104, 0.18)",
+                            background: "rgba(31, 58, 104, 0.08)",
+                            color: "#1F3A68",
                             fontSize: "inherit",
                             fontWeight: 700,
                             textTransform: "uppercase",
@@ -831,7 +846,7 @@ export default function EmployeeList({
                   </td>
 
                   <td
-                    onDoubleClick={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                     style={{
                       ...tdStyle,
                       textAlign: "center",
@@ -1055,19 +1070,33 @@ function getDetailsOrigin(type: EntityType): DetailsOrigin {
   return "leads";
 }
 
+function getEntryTime(emp: Employee): number {
+  const value = emp.CreatedOn ?? emp.LeadDate;
+  if (value == null || value === "") return 0;
+
+  const time =
+    value instanceof Date
+      ? value.getTime()
+      : typeof value === "number"
+        ? new Date(value).getTime()
+        : Date.parse(String(value));
+
+  return Number.isFinite(time) ? time : 0;
+}
+
 function getCompanyCellStyle(type: EntityType): React.CSSProperties {
   const palette: Record<EntityType, React.CSSProperties> = {
     lead: {
       background: "#ffffff",
-      color: "#334155",
+      color: "#1F3A68",
     },
     prospect: {
-      background: "#fef3c7",
-      color: "#92400e",
+      background: "rgba(242, 101, 34, 0.12)",
+      color: "#9B3F14",
     },
     account: {
-      background: "#dcfce7",
-      color: "#166534",
+      background: "rgba(18, 183, 201, 0.12)",
+      color: "#0A6570",
     },
   };
 
@@ -1083,10 +1112,10 @@ function formatDate(value: string | number | Date | null | undefined) {
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "11px 12px",
-  border: "0.5px solid #1e2b42",
+  border: "0.5px solid rgba(248, 244, 239, 0.12)",
   fontWeight: 700,
   fontSize: "13px",
-  backgroundColor: "#202939",
+  backgroundColor: "#0F1F3D",
   color: "#ffffff",
   position: "sticky",
   top: 0,
@@ -1098,7 +1127,7 @@ const thStyle: React.CSSProperties = {
 
 const tdStyle: React.CSSProperties = {
   padding: "7px 10px",
-  border: "0.5px solid #e6ebf2",
+  border: "0.5px solid rgba(31, 58, 104, 0.12)",
   verticalAlign: "top",
   fontSize: "10.05px",
   fontFamily: "inherit",
@@ -1122,9 +1151,9 @@ const convertActionButtonStyle: React.CSSProperties = {
   minWidth: 0,
   padding: "6px 10px",
   borderRadius: 8,
-  border: "1px solid #c7dafd",
-  background: "#f7faff",
-  color: "#2459d3",
+  border: "1px solid rgba(242, 101, 34, 0.24)",
+  background: "rgba(242, 101, 34, 0.08)",
+  color: "#F26522",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: "11px",
@@ -1135,7 +1164,7 @@ const convertActionButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   gap: 6,
   whiteSpace: "nowrap",
-  boxShadow: "0 1px 2px rgba(37, 89, 211, 0.08)",
+  boxShadow: "0 1px 2px rgba(242, 101, 34, 0.08)",
   transition:
     "background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
 };
@@ -1143,12 +1172,12 @@ const convertActionButtonStyle: React.CSSProperties = {
 function getConvertActionButtonStyle(isOpen: boolean): React.CSSProperties {
   return {
     ...convertActionButtonStyle,
-    background: isOpen ? "#2459d3" : "#f7faff",
-    color: isOpen ? "#ffffff" : "#2459d3",
-    borderColor: isOpen ? "#2459d3" : "#c7dafd",
+    background: isOpen ? "#F26522" : "rgba(242, 101, 34, 0.08)",
+    color: isOpen ? "#ffffff" : "#F26522",
+    borderColor: isOpen ? "#F26522" : "rgba(242, 101, 34, 0.24)",
     boxShadow: isOpen
-      ? "0 8px 18px rgba(37, 89, 211, 0.2)"
-      : "0 1px 2px rgba(37, 89, 211, 0.08)",
+      ? "0 8px 18px rgba(242, 101, 34, 0.22)"
+      : "0 1px 2px rgba(242, 101, 34, 0.08)",
   };
 }
 
@@ -1158,9 +1187,9 @@ const convertMenuStyle: React.CSSProperties = {
   right: 0,
   minWidth: 190,
   background: "#ffffff",
-  border: "1px solid #dbe4f2",
+  border: "1px solid rgba(31, 58, 104, 0.16)",
   borderRadius: 12,
-  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.16)",
+  boxShadow: "0 18px 40px rgba(15, 31, 61, 0.16)",
   padding: 8,
   display: "flex",
   flexDirection: "column",
@@ -1186,8 +1215,8 @@ const convertMenuItemStyle: React.CSSProperties = {
 function getConvertMenuItemStyle(isHovered: boolean): React.CSSProperties {
   return {
     ...convertMenuItemStyle,
-    background: isHovered ? "#eef4ff" : "#ffffff",
-    color: isHovered ? "#1d4ed8" : "#1f2937",
+    background: isHovered ? "rgba(242, 101, 34, 0.09)" : "#ffffff",
+    color: isHovered ? "#F26522" : "#1f2937",
   };
 }
 

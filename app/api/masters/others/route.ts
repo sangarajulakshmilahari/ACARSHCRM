@@ -92,6 +92,17 @@ export async function GET() {
       ORDER BY ServiceId
     `);
 
+
+    //  Probabilities
+
+    const [probabilities]: any = await pool.query(`
+      SELECT
+        ProbabilityId,
+        ProbabilityRange
+      FROM Probability
+      ORDER BY ProbabilityId
+    `);
+
     return NextResponse.json({
       opportunityStatuses,
       leadStatuses,
@@ -101,6 +112,7 @@ export async function GET() {
       Role,
       engagementModels,
       services,
+      probabilities,
     });
   } catch (error) {
     console.error("Error fetching master data:", error);
