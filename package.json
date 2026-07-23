@@ -11,6 +11,7 @@
   "dependencies": {
     "@azure/identity": "^4.13.1",
     "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@modelcontextprotocol/client": "^2.0.0-beta.5",
     "@prisma/client": "^6.19.0",
     "@reduxjs/toolkit": "^1.9.5",
     "@types/nodemailer": "^8.0.1",
