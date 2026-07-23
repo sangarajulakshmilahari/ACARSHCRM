@@ -1,221 +1,276 @@
-  import { NextRequest, NextResponse } from "next/server";
-  import { getPool } from "@/config/db";
+import { NextRequest, NextResponse } from "next/server";
 
-  const DEFAULT_ACARSH_API = "http://43.204.14.136:8200";
+import { resolveAuthUser, type ResolvedAuthUser } from "@/app/api/lib/auth";
 
-  type SessionRequestBody = {
-    type: "session";
-    userId: number;
+import { executeConfirmedWrites, runAgent } from "./agent";
+import {
+  agentHistory,
+  createConversation,
+  getOrCreateConversation,
+  getPreviousConversationContext,
+  listConversations,
+  loadConversation,
+  saveExchange,
+  type StoredConversation,
+} from "./history";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type RequestBody = {
+  type:
+    | "bootstrap"
+    | "session"
+    | "chat"
+    | "confirm_write"
+    | "reject_write"
+    | "new_conversation"
+    | "load_conversation";
+  sessionId?: string;
+  message?: string;
+};
+
+const CONFIRM_PATTERN = /^(confirm|confirmed|yes|yes,? proceed|proceed|go ahead|do it)$/i;
+const CANCEL_PATTERN = /^(cancel|stop|no|never mind|nevermind)$/i;
+
+const lockGlobal = globalThis as typeof globalThis & {
+  __acarshConversationLocks?: Map<string, Promise<void>>;
+};
+const conversationLocks =
+  lockGlobal.__acarshConversationLocks || new Map<string, Promise<void>>();
+lockGlobal.__acarshConversationLocks = conversationLocks;
+
+async function withConversationLock<T>(
+  conversationId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = conversationLocks.get(conversationId) || Promise.resolve();
+  const run = previous.catch(() => undefined).then(operation);
+  const barrier = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  conversationLocks.set(conversationId, barrier);
+  try {
+    return await run;
+  } finally {
+    if (conversationLocks.get(conversationId) === barrier) {
+      conversationLocks.delete(conversationId);
+    }
+  }
+}
+
+function publicRole(roleId: number) {
+  return roleId === 1 ? "manager" : "sales_executive";
+}
+
+function serializedMessages(conversation: StoredConversation) {
+  return conversation.messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    tool_calls: message.toolCalls,
+  }));
+}
+
+async function conversationPayload(
+  user: ResolvedAuthUser,
+  conversation: StoredConversation,
+) {
+  return {
+    session_id: conversation.id,
+    user: { name: user.userName, role: publicRole(user.roleId) },
+    messages: serializedMessages(conversation),
+    conversations: await listConversations(user),
+    confirmation_required: conversation.pendingWrites.length > 0,
   };
+}
 
-  type BootstrapRequestBody = {
-    type: "bootstrap";
-  };
+function errorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unexpected assistant error";
+  console.error("[crm-assistant]", error);
+  const unavailable =
+    message.includes("ECONNREFUSED") ||
+    message.includes("fetch failed") ||
+    message.includes("MCP");
+  return NextResponse.json(
+    {
+      detail: unavailable
+        ? "The CRM assistant service is unavailable. Your conversation was preserved; please retry."
+        : message,
+    },
+    { status: 502 },
+  );
+}
 
-  type ChatRequestBody = {
-    type: "chat";
-    userId?: number;
-    sessionId?: string;
-    message: string;
-  };
+async function requireConversation(
+  user: ResolvedAuthUser,
+  conversationId: string,
+) {
+  const conversation = await loadConversation(user, conversationId);
+  if (!conversation) throw new Error("Conversation is missing or unavailable");
+  return conversation;
+}
 
-  async function getLoggedInUser(req: NextRequest): Promise<{
-    userId: number;
-    userName: string;
-  } | null> {
-    const encodedUser = req.cookies.get("user")?.value;
-    let userName = encodedUser ? decodeURIComponent(encodedUser) : "";
-    let email = "";
-    let keycloakId = "";
+export async function POST(req: NextRequest) {
+  const user = await resolveAuthUser(req);
+  if (!user) {
+    return NextResponse.json({ detail: "No logged-in user found." }, { status: 401 });
+  }
+  if (![1, 2].includes(user.roleId)) {
+    return NextResponse.json(
+      { detail: "Your role is not enabled for the CRM assistant." },
+      { status: 403 },
+    );
+  }
 
-    const token = req.cookies.get("access_token")?.value;
-    if (token) {
-      try {
-        const payloadPart = token.split(".")[1] || "";
-        const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
-        const padded = normalized.padEnd(
-          normalized.length + ((4 - (normalized.length % 4)) % 4),
-          "=",
+  let body: RequestBody;
+  try {
+    body = (await req.json()) as RequestBody;
+  } catch {
+    return NextResponse.json({ detail: "Invalid JSON request." }, { status: 400 });
+  }
+
+  try {
+    if (body.type === "bootstrap" || body.type === "session") {
+      const conversation = await getOrCreateConversation(user);
+      return NextResponse.json(await conversationPayload(user, conversation));
+    }
+
+    if (body.type === "new_conversation") {
+      const conversation = await createConversation(user);
+      return NextResponse.json(await conversationPayload(user, conversation));
+    }
+
+    if (body.type === "load_conversation") {
+      const conversationId = String(body.sessionId || "").trim();
+      const conversation = await loadConversation(user, conversationId);
+      if (!conversation) {
+        return NextResponse.json(
+          { detail: "Conversation was not found." },
+          { status: 404 },
         );
-        const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-        keycloakId = String(payload?.sub || "");
-        userName = userName || String(payload?.preferred_username || "");
-        email = String(payload?.email || "");
-      } catch {
-        // ignore token decode failure and fall through to null return below
       }
+      return NextResponse.json(await conversationPayload(user, conversation));
     }
 
-    if (!keycloakId && !userName && !email) return null;
-
-    const pool = await getPool();
-    const conn = await pool.getConnection();
-    try {
-      const [rows]: any = await conn.query(
-        `SELECT UserId, UserName
-        FROM Users
-        WHERE KeycloakId = ? OR UserName = ? OR Email = ?
-        LIMIT 1`,
-        [keycloakId, userName || email, email || userName],
-      );
-
-      if (!rows?.length) return null;
-      return {
-        userId: Number(rows[0].UserId),
-        userName: String(rows[0].UserName || userName),
-      };
-    } finally {
-      conn.release();
+    if (
+      body.type !== "chat" &&
+      body.type !== "confirm_write" &&
+      body.type !== "reject_write"
+    ) {
+      return NextResponse.json({ detail: "Invalid request type." }, { status: 400 });
     }
-  }
 
-  export async function POST(req: NextRequest) {
-    try {
-      const body = (await req.json()) as
-        | SessionRequestBody
-        | BootstrapRequestBody
-        | ChatRequestBody;
-      const apiBase =
-        process.env.ACARSH_API_URL?.trim() ||
-        process.env.NEXT_PUBLIC_ACARSH_API_URL?.trim() ||
-        DEFAULT_ACARSH_API;
+    const message =
+      body.type === "confirm_write"
+        ? "Confirmed"
+        : body.type === "reject_write"
+          ? "Rejected"
+          : String(body.message || "").trim();
+    if (body.type === "chat" && !message) {
+      return NextResponse.json({ detail: "message is required." }, { status: 400 });
+    }
+    const conversationId = String(body.sessionId || "").trim();
+    if (!conversationId) {
+      return NextResponse.json({ detail: "sessionId is required." }, { status: 400 });
+    }
 
-      if (body?.type === "session") {
-        const userId = Number(body.userId);
-        if (!Number.isFinite(userId) || userId <= 0) {
-          return NextResponse.json(
-            { detail: "Valid userId is required." },
-            { status: 400 },
-          );
-        }
+    return await withConversationLock(conversationId, async () => {
+      const conversation = await requireConversation(user, conversationId);
+      const history = agentHistory(conversation.messages);
 
-        const res = await fetch(`${apiBase}/crm/chat/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId }),
-          cache: "no-store",
+      const isReject =
+        body.type === "reject_write" ||
+        (body.type === "chat" && CANCEL_PATTERN.test(message));
+      if (conversation.pendingWrites.length && isReject) {
+        const reply = "Cancelled. No CRM data was changed.";
+        await saveExchange({
+          user,
+          conversationId,
+          userMessage: message,
+          assistantReply: reply,
+          toolCalls: [],
+          pendingWrites: [],
         });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          return NextResponse.json(
-            { detail: data?.detail || "User not found. Check the ID and try again." },
-            { status: res.status || 400 },
-          );
-        }
-
         return NextResponse.json({
-          session_id: data.session_id,
-          user: {
-            name: data?.user?.name || `User ${userId}`,
-            role: (data?.user?.role || "agent").toLowerCase(),
+          session_id: conversationId,
+          reply,
+          tool_calls: [],
+          conversations: await listConversations(user),
+          confirmation_required: false,
+        });
+      }
+
+      const isConfirm =
+        body.type === "confirm_write" ||
+        (body.type === "chat" && CONFIRM_PATTERN.test(message));
+      if (conversation.pendingWrites.length && isConfirm) {
+        const result = await executeConfirmedWrites(
+          user,
+          history,
+          conversation.pendingWrites,
+        );
+        await saveExchange({
+          user,
+          conversationId,
+          userMessage: message,
+          assistantReply: result.reply,
+          toolCalls: result.toolCalls,
+          pendingWrites: [],
+        });
+        return NextResponse.json({
+          session_id: conversationId,
+          reply: result.reply,
+          tool_calls: result.toolCalls,
+          conversations: await listConversations(user),
+          confirmation_required: false,
+        });
+      }
+
+      if (body.type === "confirm_write" || body.type === "reject_write") {
+        return NextResponse.json(
+          {
+            detail: "There is no pending CRM change to confirm or reject.",
+            confirmation_required: false,
           },
-        });
+          { status: 409 },
+        );
       }
 
-      if (body?.type === "bootstrap") {
-        const loggedIn = await getLoggedInUser(req);
-        if (!loggedIn) {
-          return NextResponse.json(
-            { detail: "No logged-in user found." },
-            { status: 401 },
-          );
-        }
-
-        const res = await fetch(`${apiBase}/crm/chat/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: loggedIn.userId }),
-          cache: "no-store",
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          return NextResponse.json(
-            { detail: data?.detail || "Unable to start chat session." },
-            { status: res.status || 400 },
-          );
-        }
-
-        return NextResponse.json({
-          session_id: data.session_id,
-          user: {
-            name: data?.user?.name || loggedIn.userName,
-            role: (data?.user?.role || "agent").toLowerCase(),
+      if (conversation.pendingWrites.length) {
+        return NextResponse.json(
+          {
+            detail:
+              "A CRM change is awaiting your decision. Use Confirm or Reject before continuing.",
+            confirmation_required: true,
           },
-        });
+          { status: 409 },
+        );
       }
 
-      if (body?.type === "chat") {
-        const loggedIn = await getLoggedInUser(req);
-        const userId = Number(body.userId || loggedIn?.userId);
-        let sessionId = String(body.sessionId || "").trim();
-        const message = String(body.message || "").trim();
-
-        if (!Number.isFinite(userId) || userId <= 0) {
-          return NextResponse.json(
-            { detail: "Valid userId is required." },
-            { status: 400 },
-          );
-        }
-        if (!sessionId) {
-          const sessionRes = await fetch(`${apiBase}/crm/chat/session`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: userId }),
-            cache: "no-store",
-          });
-          const sessionData = await sessionRes.json().catch(() => ({}));
-          if (!sessionRes.ok || !sessionData?.session_id) {
-            return NextResponse.json(
-              { detail: sessionData?.detail || "Unable to start chat session." },
-              { status: sessionRes.status || 400 },
-            );
-          }
-          sessionId = String(sessionData.session_id);
-        }
-        if (!message) {
-          return NextResponse.json(
-            { detail: "message is required." },
-            { status: 400 },
-          );
-        }
-
-        const res = await fetch(`${apiBase}/crm/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_id: sessionId,
-            user_id: userId,
-            message,
-          }),
-          cache: "no-store",
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          return NextResponse.json(
-            { detail: data?.detail || "Assistant request failed." },
-            { status: res.status || 500 },
-          );
-        }
-
-        return NextResponse.json({
-          session_id: data.session_id,
-          reply: data.reply || "",
-          tool_calls: Array.isArray(data.tool_calls) ? data.tool_calls : [],
-        });
-      }
-
-      return NextResponse.json(
-        { detail: "Invalid request type. Use 'bootstrap', 'session', or 'chat'." },
-        { status: 400 },
+      const previousContext = await getPreviousConversationContext(
+        user,
+        conversationId,
       );
-    } catch (error: any) {
-      return NextResponse.json(
-        { detail: error?.message || "Unexpected server error." },
-        { status: 500 },
-      );
-    }
+      const result = await runAgent(user, history, message, previousContext);
+      const pendingWrites = result.pendingWrites || [];
+      await saveExchange({
+        user,
+        conversationId,
+        userMessage: message,
+        assistantReply: result.reply,
+        toolCalls: result.toolCalls,
+        pendingWrites,
+      });
+      return NextResponse.json({
+        session_id: conversationId,
+        reply: result.reply,
+        tool_calls: result.toolCalls,
+        conversations: await listConversations(user),
+        confirmation_required: pendingWrites.length > 0,
+      });
+    });
+  } catch (error) {
+    return errorResponse(error);
   }
-
+}

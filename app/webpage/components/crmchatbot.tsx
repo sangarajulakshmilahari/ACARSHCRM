@@ -1,6 +1,14 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  Clock3,
+  MessageSquare,
+  Plus,
+  X,
+} from "lucide-react";
 import styles from "../components/crmchatbot.module.css";
 
 type Props = {
@@ -24,7 +32,19 @@ type ChatMessage = {
   toolCalls?: Array<{ name: string; result_summary?: string }>;
 };
 
+type ConversationSummary = {
+  id: string;
+  title: string;
+  updatedAt: string;
+};
+
 const SUGGESTIONS_BY_ROLE: Record<string, string[]> = {
+  sales_executive: [
+    "Show my pipeline summary",
+    "List my prospects",
+    "What did I do this week?",
+    "Search my records for Acme Corp",
+  ],
   agent: [
     "Show my pipeline summary",
     "List my prospects",
@@ -111,7 +131,12 @@ function renderAssistantContent(content: string) {
                 {bodyRows.map((row, rIdx) => (
                   <tr key={`r-${rIdx}`}>
                     {row.map((cell, cIdx) => (
-                      <td key={`c-${rIdx}-${cIdx}`}>{renderInlineText(cell)}</td>
+                      <td
+                        key={`c-${rIdx}-${cIdx}`}
+                        data-label={headers[cIdx] || "Value"}
+                      >
+                        {renderInlineText(cell)}
+                      </td>
                     ))}
                   </tr>
                 ))}
@@ -150,11 +175,29 @@ function renderAssistantContent(content: string) {
 
 function mapToolNameToActionType(name: string): string | null {
   const key = name.toLowerCase();
-  if (key.includes("create")) return "lead_created";
-  if (key.includes("update") || key.includes("edit")) return "lead_updated";
-  if (key.includes("delete") || key.includes("remove")) return "lead_deleted";
-  if (key.includes("convert")) return "lead_converted";
+  if (key === "create_lead") return "lead_created";
+  if (key === "delete_lead") return "lead_deleted";
+  if (/^(add|assign|convert|create|delete|remove|schedule|update)_/.test(key)) {
+    return "lead_updated";
+  }
   return null;
+}
+
+function formatConversationTime(value: string) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "Recent conversation";
+
+  const now = new Date();
+  const sameDay =
+    timestamp.getFullYear() === now.getFullYear() &&
+    timestamp.getMonth() === now.getMonth() &&
+    timestamp.getDate() === now.getDate();
+
+  const options: Intl.DateTimeFormatOptions = sameDay
+    ? { hour: "numeric", minute: "2-digit" }
+    : { month: "short", day: "numeric", year: "numeric" };
+
+  return new Intl.DateTimeFormat(undefined, options).format(timestamp);
 }
 
 export default function CRMChatBot({
@@ -171,10 +214,20 @@ export default function CRMChatBot({
   const [role, setRole] = useState<string>("agent");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [switchingConversation, setSwitchingConversation] = useState(false);
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [confirmationRequired, setConfirmationRequired] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const conversationMenuRef = useRef<HTMLDivElement>(null);
+
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === sessionId),
+    [conversations, sessionId],
+  );
 
   const suggestions = useMemo(
     () => {
@@ -190,6 +243,53 @@ export default function CRMChatBot({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    if (!conversationMenuOpen) return;
+
+    function closeConversationMenu(event: MouseEvent) {
+      if (
+        conversationMenuRef.current &&
+        !conversationMenuRef.current.contains(event.target as Node)
+      ) {
+        setConversationMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setConversationMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeConversationMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeConversationMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [conversationMenuOpen]);
+
+  function messagesFromPayload(value: unknown): ChatMessage[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter(
+        (message: any) =>
+          message?.role === "user" || message?.role === "assistant",
+      )
+      .map((message: any) => ({
+        role: message.role,
+        content: String(message.content || ""),
+        toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
+      }));
+  }
+
+  function applyConversationPayload(data: any) {
+    setSessionId(String(data?.session_id || ""));
+    setMessages(messagesFromPayload(data?.messages));
+    setConversations(
+      Array.isArray(data?.conversations) ? data.conversations : [],
+    );
+    setConfirmationRequired(Boolean(data?.confirmation_required));
+  }
 
   async function login() {
     setLoadingLogin(true);
@@ -208,10 +308,9 @@ export default function CRMChatBot({
         return;
       }
 
-      setSessionId(data.session_id || "");
+      applyConversationPayload(data);
       setUserName(data?.user?.name || ownerName || "CRM User");
       setRole((data?.user?.role || "agent").toLowerCase());
-      setMessages([]);
     } catch {
       setLoginError("Unable to connect to assistant service.");
     } finally {
@@ -224,9 +323,43 @@ export default function CRMChatBot({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function sendMessage(forcedText?: string) {
+  async function changeConversation(
+    type: "new_conversation" | "load_conversation",
+    targetSessionId?: string,
+  ) {
+    if (sending || switchingConversation) return;
+    setConversationMenuOpen(false);
+    setSwitchingConversation(true);
+    setLoginError("");
+    try {
+      const res = await fetch("/api/ai/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, sessionId: targetSessionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Unable to load conversation.");
+      applyConversationPayload(data);
+    } catch (error: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: error?.message || "Unable to load conversation.",
+          toolCalls: [],
+        },
+      ]);
+    } finally {
+      setSwitchingConversation(false);
+    }
+  }
+
+  async function sendMessage(
+    forcedText?: string,
+    requestType: "chat" | "confirm_write" | "reject_write" = "chat",
+  ) {
     const rawText = (forcedText || input).trim();
-    const text = extensions?.transformOutgoingMessage
+    const text = requestType === "chat" && extensions?.transformOutgoingMessage
       ? extensions.transformOutgoingMessage(rawText).trim()
       : rawText;
     if (!text || sending || !sessionId) return;
@@ -240,9 +373,9 @@ export default function CRMChatBot({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "chat",
+          type: requestType,
           sessionId,
-          message: text,
+          ...(requestType === "chat" ? { message: text } : {}),
         }),
       });
 
@@ -261,6 +394,10 @@ export default function CRMChatBot({
 
       const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
       setSessionId(data.session_id || sessionId);
+      if (Array.isArray(data.conversations)) {
+        setConversations(data.conversations);
+      }
+      setConfirmationRequired(Boolean(data.confirmation_required));
       setMessages((prev) => [
         ...prev,
         {
@@ -291,25 +428,24 @@ export default function CRMChatBot({
     }
   }
 
-  function logout() {
-    window.location.href = "/api/auth/logout";
-  }
-
   return (
     <div className={styles.panelContainer}>
       {!sessionId ? (
         <div className={styles.loginWrapper}>
           <div className={styles.loginCard}>
             <div className={styles.loginHeader}>
-              <h1 className={styles.loginTitle}>ACARSH</h1>
-              <button
-                onClick={onClose}
-                className={styles.closeBtn}
-                aria-label="Close chatbot"
-                title="Close chatbot"
-              >
-                ✕
-              </button>
+              <h1 className={styles.loginTitle}>DROIT buddy</h1>
+              {onClose ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={styles.closeBtn}
+                  aria-label="Close DROIT buddy"
+                  title="Close"
+                >
+                  <X size={17} strokeWidth={2.25} aria-hidden="true" />
+                </button>
+              ) : null}
             </div>
             <p className={styles.loginSubtitle}>
               Natural-language CRM analytics assistant
@@ -329,20 +465,111 @@ export default function CRMChatBot({
       ) : (
         <>
           <div className={styles.headerStyle}>
-            <div>
-              <div className={styles.chatTitle}>ACARSH Chat</div>
-              <div className={styles.chatSubtitle}>
-                {userName} · {role}
+            <div className={styles.chatIdentity}>
+              <div className={styles.chatAvatar} aria-hidden="true">
+                D
+              </div>
+              <div className={styles.chatHeading}>
+                <div className={styles.chatTitle}>DROIT buddy</div>
+                <div className={styles.chatSubtitle}>
+                  {userName}
+                  <span className={styles.rolePill}>{role.replace(/_/g, " ")}</span>
+                </div>
               </div>
             </div>
-            <div className={styles.headerButtonGroup}>
-              <button onClick={logout} className={styles.headSmallBtn}>
-                Sign out
+            {onClose ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className={styles.headerCloseBtn}
+                aria-label="Close DROIT buddy"
+                title="Close"
+              >
+                <X size={18} strokeWidth={2.25} aria-hidden="true" />
               </button>
-              <button onClick={onClose} className={styles.headSmallBtn}>
-                Close
+            ) : null}
+          </div>
+
+          <div className={styles.conversationBar}>
+            <div className={styles.conversationPicker} ref={conversationMenuRef}>
+              <button
+                type="button"
+                className={styles.conversationTrigger}
+                disabled={sending || switchingConversation}
+                aria-haspopup="listbox"
+                aria-expanded={conversationMenuOpen}
+                onClick={() => setConversationMenuOpen((open) => !open)}
+              >
+                <span className={styles.conversationTriggerIcon} aria-hidden="true">
+                  <Clock3 size={16} strokeWidth={2} />
+                </span>
+                <span className={styles.conversationTriggerCopy}>
+                  <span className={styles.conversationLabel}>Previous chats</span>
+                  <span className={styles.conversationCurrentTitle}>
+                    {activeConversation?.title || "Current conversation"}
+                  </span>
+                </span>
+                <ChevronDown
+                  size={17}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className={conversationMenuOpen ? styles.chevronOpen : undefined}
+                />
               </button>
+
+              {conversationMenuOpen ? (
+                <div
+                  className={styles.conversationMenu}
+                  role="listbox"
+                  aria-label="Previous chats"
+                >
+                  <div className={styles.conversationMenuHeader}>Previous chats</div>
+                  <div className={styles.conversationMenuList}>
+                    {conversations.map((conversation) => {
+                      const selected = conversation.id === sessionId;
+                      return (
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          key={conversation.id}
+                          className={`${styles.conversationOption} ${
+                            selected ? styles.conversationOptionActive : ""
+                          }`}
+                          onClick={() =>
+                            changeConversation("load_conversation", conversation.id)
+                          }
+                        >
+                          <span className={styles.conversationOptionIcon} aria-hidden="true">
+                            <MessageSquare size={15} strokeWidth={2} />
+                          </span>
+                          <span className={styles.conversationOptionCopy}>
+                            <span className={styles.conversationOptionTitle}>
+                              {conversation.title || "Untitled conversation"}
+                            </span>
+                            <span className={styles.conversationOptionTime}>
+                              {formatConversationTime(conversation.updatedAt)}
+                            </span>
+                          </span>
+                          {selected ? (
+                            <Check size={16} strokeWidth={2.25} aria-hidden="true" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
+            <button
+              type="button"
+              className={styles.newConversationBtn}
+              disabled={sending || switchingConversation}
+              onClick={() => changeConversation("new_conversation")}
+            >
+              <Plus size={16} strokeWidth={2.25} aria-hidden="true" />
+              <span>New</span>
+            </button>
           </div>
 
           <div className={styles.messagesContainer}>
@@ -366,7 +593,22 @@ export default function CRMChatBot({
             )}
 
             {messages.map((msg, idx) => (
-              <div key={`${msg.role}-${idx}`} className={styles.messageWrapper}>
+              <div
+                key={`${msg.role}-${idx}`}
+                className={`${styles.messageWrapper} ${
+                  msg.role === "assistant"
+                    ? styles.assistantMessageGroup
+                    : styles.userMessageGroup
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <div className={styles.assistantMessageHeader}>
+                    <span className={styles.assistantMessageAvatar} aria-hidden="true">
+                      D
+                    </span>
+                    <span className={styles.assistantMessageName}>DROIT buddy</span>
+                  </div>
+                ) : null}
                 <div
                   className={
                     msg.role === "user"
@@ -390,22 +632,32 @@ export default function CRMChatBot({
                 </div>
 
                 {!!msg.toolCalls?.length && (
-                  <div className={styles.toolsWrap}>
-                    <div className={styles.toolsLabel}>
-                      {msg.toolCalls.length} tool
-                      {msg.toolCalls.length > 1 ? "s" : ""} used
+                  <details className={styles.toolsWrap}>
+                    <summary className={styles.toolsLabel}>
+                      <span>
+                        {msg.toolCalls.length} tool
+                        {msg.toolCalls.length > 1 ? "s" : ""} used
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        strokeWidth={2.25}
+                        className={styles.toolsChevron}
+                        aria-hidden="true"
+                      />
+                    </summary>
+                    <div className={styles.toolsList}>
+                      {msg.toolCalls.map((tc, i) => (
+                        <div key={`${tc.name}-${i}`} className={styles.toolChip}>
+                          <strong>{tc.name}</strong>
+                          {tc.result_summary ? (
+                            <div className={styles.toolSummary}>
+                              {tc.result_summary}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
                     </div>
-                    {msg.toolCalls.map((tc, i) => (
-                      <div key={`${tc.name}-${i}`} className={styles.toolChip}>
-                        <strong>{tc.name}</strong>
-                        {tc.result_summary ? (
-                          <div className={styles.toolSummary}>
-                            {tc.result_summary}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
+                  </details>
                 )}
               </div>
             ))}
@@ -420,14 +672,44 @@ export default function CRMChatBot({
             <div ref={bottomRef} />
           </div>
 
+          {confirmationRequired ? (
+            <div className={styles.confirmationPanel} role="status">
+              <div className={styles.confirmationText}>
+                Review the proposed change above, then choose an action.
+              </div>
+              <div className={styles.confirmationActions}>
+                <button
+                  type="button"
+                  className={styles.confirmButton}
+                  disabled={sending || switchingConversation}
+                  onClick={() => sendMessage("Confirm", "confirm_write")}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className={styles.rejectButton}
+                  disabled={sending || switchingConversation}
+                  onClick={() => sendMessage("Reject", "reject_write")}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className={styles.inputContainer}>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type a message…"
+              placeholder={
+                confirmationRequired
+                  ? "Use Confirm or Reject above"
+                  : "Type a message…"
+              }
               rows={1}
               className={styles.inputField}
-              disabled={sending}
+              disabled={sending || switchingConversation || confirmationRequired}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -437,7 +719,12 @@ export default function CRMChatBot({
             />
             <button
               onClick={() => sendMessage()}
-              disabled={sending || !input.trim()}
+              disabled={
+                sending ||
+                switchingConversation ||
+                confirmationRequired ||
+                !input.trim()
+              }
               className={styles.sendButton}
               style={{ opacity: sending || !input.trim() ? 0.5 : 1 }}
             >

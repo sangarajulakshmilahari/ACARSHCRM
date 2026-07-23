@@ -3,7 +3,7 @@ import mysql from "mysql2/promise";
 const config = {
   host: "localhost",    
   user: "root",          
-  password: "root",      
+  password: "Mahesh@2003567",      
   database: "acarsh_db",
  
   waitForConnections: true,

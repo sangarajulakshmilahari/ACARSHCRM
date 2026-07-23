@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS AIChatConversations (
+  ConversationId VARCHAR(36) NOT NULL PRIMARY KEY,
+  UserId INT NOT NULL,
+  RoleId INT NOT NULL,
+  Title VARCHAR(160) NOT NULL DEFAULT 'New conversation',
+  PendingWritesJson LONGTEXT NULL,
+  IsArchived TINYINT(1) NOT NULL DEFAULT 0,
+  CreatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  UpdatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    ON UPDATE CURRENT_TIMESTAMP(6),
+  INDEX IX_AIChatConversations_UserRoleUpdated
+    (UserId, RoleId, IsArchived, UpdatedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS AIChatMessages (
+  MessageId BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ConversationId VARCHAR(36) NOT NULL,
+  Role VARCHAR(16) NOT NULL,
+  Content LONGTEXT NOT NULL,
+  ToolCallsJson LONGTEXT NULL,
+  CreatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  INDEX IX_AIChatMessages_ConversationMessage (ConversationId, MessageId),
+  CONSTRAINT FK_AIChatMessages_Conversation
+    FOREIGN KEY (ConversationId)
+    REFERENCES AIChatConversations (ConversationId)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -3,6 +3,7 @@ node_modules
 .env
 .env.local
 .env.*
+!.env.example
 .next
 
 config/db.ts
