@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveAuthUser, type ResolvedAuthUser } from "@/app/api/lib/auth";
 
-import { executeConfirmedWrites, runAgent } from "./agent";
+import { addActivityDirect, executeConfirmedWrites, runAgent } from "./agent";
 import {
   agentHistory,
   createConversation,
@@ -30,8 +30,212 @@ type RequestBody = {
   message?: string;
 };
 
+type PendingActivityDraft = {
+  lead_id?: string;
+  activity_type?: string;
+  notes?: string;
+  status?: string;
+  contact_id?: string;
+};
+
+const activityDraftGlobal = globalThis as typeof globalThis & {
+  __acarshPendingActivityDrafts?: Map<string, PendingActivityDraft>;
+};
+const pendingActivityDrafts =
+  activityDraftGlobal.__acarshPendingActivityDrafts || new Map<string, PendingActivityDraft>();
+activityDraftGlobal.__acarshPendingActivityDrafts = pendingActivityDrafts;
+
+function getPendingActivityDraft(conversationId: string) {
+  return pendingActivityDrafts.get(conversationId) || null;
+}
+
+function setPendingActivityDraft(conversationId: string, draft: PendingActivityDraft | null) {
+  if (!draft) {
+    pendingActivityDrafts.delete(conversationId);
+    return;
+  }
+  pendingActivityDrafts.set(conversationId, draft);
+}
+
 const CONFIRM_PATTERN = /^(confirm|confirmed|yes|yes,? proceed|proceed|go ahead|do it)$/i;
 const CANCEL_PATTERN = /^(cancel|stop|no|never mind|nevermind)$/i;
+
+const ACTIVITY_TYPE_VALUES = [
+  "Call",
+  "Email",
+  "Meeting",
+  "Demo",
+  "Follow-Up",
+  "Visit",
+  "WhatsApp",
+  "SMS",
+] as const;
+
+const STATUS_VALUES = [
+  "New",
+  "Contacted",
+  "Follow-Up",
+  "Qualified",
+  "Unqualified",
+  "Lost",
+  "Converted",
+  "Open",
+  "In Progress",
+  "Completed",
+  "Pending",
+  "Closed",
+] as const;
+
+function mapStatusToLeadStatus(value: string) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (["completed", "complete", "done", "closed", "resolved"].includes(normalized)) {
+    return "Follow-Up";
+  }
+  if (["open", "in progress", "pending", "new"].includes(normalized)) {
+    return "New";
+  }
+  return titleCase(value);
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function titleCase(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function detectAddActivityIntent(message: string) {
+  return /\b(?:create|add|log|record)\b[\s\S]*\bactivit(?:y|ies|iy)\b/i.test(message);
+}
+
+function extractLeadReference(message: string) {
+  const normalized = normalizeText(message);
+  const match = normalized.match(
+    /\bfor\s+(.+?)(?:\s+(?:with|without|type|activity\s*type|notes?|status|on|at|date|time|contact)\b|[.!?]|$)/i,
+  );
+  if (!match?.[1]) return undefined;
+  const value = match[1].replace(/^(?:the\s+)?(?:company|lead)\s+/i, "").trim();
+  return value || undefined;
+}
+
+function pickFromList(message: string, options: readonly string[]) {
+  const normalized = message.trim().toLowerCase();
+  const found = options.find((option) => normalized === option.toLowerCase());
+  if (found) return found;
+  return options.find((option) => {
+    const pattern = option
+      .split(/[-\s]+/)
+      .filter(Boolean)
+      .map((part) => escapeRegex(part))
+      .join("[-\\s]*");
+    return new RegExp(`\\b${pattern}\\b`, "i").test(message);
+  });
+}
+
+function extractByLabel(message: string, label: string) {
+  const normalized = normalizeText(message);
+  const match = normalized.match(
+    new RegExp(`${label}\\s*(?:is|:)?\\s*(.+)$`, "i"),
+  );
+  return match?.[1]?.trim();
+}
+
+function updateDraftFromMessage(
+  current: PendingActivityDraft,
+  message: string,
+): PendingActivityDraft {
+  const updated: PendingActivityDraft = { ...current };
+  const before = { ...updated };
+
+  if (!updated.lead_id) {
+    const lead = extractLeadReference(message);
+    if (lead) updated.lead_id = lead;
+  }
+
+  if (!updated.activity_type) {
+    const labeled = extractByLabel(message, "(?:activity\\s*type|type)");
+    const fromList = pickFromList(message, ACTIVITY_TYPE_VALUES);
+    if (fromList) updated.activity_type = fromList;
+    else if (labeled) updated.activity_type = titleCase(labeled);
+  }
+
+  if (!updated.notes) {
+    const notes = extractByLabel(message, "notes?");
+    if (notes) updated.notes = notes;
+  }
+
+  if (!updated.status) {
+    const labeled = extractByLabel(message, "status");
+    const fromList = pickFromList(message, STATUS_VALUES);
+    if (fromList) updated.status = mapStatusToLeadStatus(fromList);
+    else if (labeled) updated.status = mapStatusToLeadStatus(labeled);
+  }
+
+  const noContact = /\b(?:no\s+contact|without\s+contact|proceed\s+without\s+contact)\b/i.test(
+    message,
+  );
+  if (noContact) {
+    updated.contact_id = "";
+  } else if (!updated.contact_id) {
+    const normalized = normalizeText(message);
+    const contactNamed =
+      normalized.match(/\bcontact\b\s*(?::|is)?\s+([A-Za-z][A-Za-z\s.'-]{1,80})$/i)?.[1]?.trim() ||
+      "";
+    const withContact =
+      normalized.match(/\bwith\s+([A-Za-z][A-Za-z\s.'-]{1,80})$/i)?.[1]?.trim() || "";
+    if (contactNamed) updated.contact_id = contactNamed;
+    else if (withContact) updated.contact_id = withContact;
+  }
+
+  const changed =
+    before.lead_id !== updated.lead_id ||
+    before.activity_type !== updated.activity_type ||
+    before.status !== updated.status ||
+    before.notes !== updated.notes ||
+    before.contact_id !== updated.contact_id;
+
+  if (!changed && !updated.notes) {
+    const raw = normalizeText(message);
+    if (
+      raw &&
+      !detectAddActivityIntent(raw) &&
+      !CANCEL_PATTERN.test(raw) &&
+      !/^(confirm|confirmed|yes|proceed|go ahead|do it)$/i.test(raw) &&
+      !/\b(?:no\s+contact|without\s+contact|proceed\s+without\s+contact)\b/i.test(raw)
+    ) {
+      updated.notes = raw;
+    }
+  }
+
+  return updated;
+}
+
+function nextActivityQuestion(draft: PendingActivityDraft): string | null {
+  if (!draft.lead_id) return "Which lead or company should I add this activity to?";
+  if (!draft.activity_type) return "What type of activity would you like to create?";
+  if (!draft.status) return "What status should I set?";
+  if (!draft.notes) return "What notes should I add?";
+  return null;
+}
+
+function isNeedsInput(payload: unknown): payload is { status: "needs_input"; questions?: string[] } {
+  if (!payload || typeof payload !== "object") return false;
+  return String((payload as Record<string, unknown>).status || "") === "needs_input";
+}
+
+function isErrorPayload(payload: unknown): payload is { status: "error"; error?: { message?: string } } {
+  if (!payload || typeof payload !== "object") return false;
+  return String((payload as Record<string, unknown>).status || "") === "error";
+}
 
 const lockGlobal = globalThis as typeof globalThis & {
   __acarshConversationLocks?: Map<string, Promise<void>>;
@@ -179,11 +383,120 @@ export async function POST(req: NextRequest) {
       const conversation = await requireConversation(user, conversationId);
       const history = agentHistory(conversation.messages);
 
+      const pendingActivity = getPendingActivityDraft(conversationId);
+
+      if (body.type === "chat") {
+        if (pendingActivity && CANCEL_PATTERN.test(message)) {
+          const reply = "Cancelled. Activity creation was stopped.";
+          setPendingActivityDraft(conversationId, null);
+          await saveExchange({
+            user,
+            conversationId,
+            userMessage: message,
+            assistantReply: reply,
+            toolCalls: [],
+            pendingWrites: conversation.pendingWrites,
+          });
+          return NextResponse.json({
+            session_id: conversationId,
+            reply,
+            tool_calls: [],
+            conversations: await listConversations(user),
+            confirmation_required: conversation.pendingWrites.length > 0,
+          });
+        }
+
+        if (pendingActivity || detectAddActivityIntent(message)) {
+          const updatedDraft = updateDraftFromMessage(pendingActivity || {}, message);
+          const followUp = nextActivityQuestion(updatedDraft);
+          if (followUp) {
+            setPendingActivityDraft(conversationId, updatedDraft);
+            await saveExchange({
+              user,
+              conversationId,
+              userMessage: message,
+              assistantReply: followUp,
+              toolCalls: [],
+              pendingWrites: conversation.pendingWrites,
+            });
+            return NextResponse.json({
+              session_id: conversationId,
+              reply: followUp,
+              tool_calls: [],
+              conversations: await listConversations(user),
+              confirmation_required: conversation.pendingWrites.length > 0,
+            });
+          }
+
+          const payload = await addActivityDirect(user, updatedDraft);
+          if (isNeedsInput(payload)) {
+            const question = Array.isArray(payload.questions) && payload.questions.length
+              ? String(payload.questions[0])
+              : "I still need one more detail to create this activity.";
+            setPendingActivityDraft(conversationId, updatedDraft);
+            await saveExchange({
+              user,
+              conversationId,
+              userMessage: message,
+              assistantReply: question,
+              toolCalls: [],
+              pendingWrites: conversation.pendingWrites,
+            });
+            return NextResponse.json({
+              session_id: conversationId,
+              reply: question,
+              tool_calls: [],
+              conversations: await listConversations(user),
+              confirmation_required: conversation.pendingWrites.length > 0,
+            });
+          }
+
+          if (isErrorPayload(payload)) {
+            const reply = String(payload.error?.message || "I could not create that activity.");
+            setPendingActivityDraft(conversationId, updatedDraft);
+            await saveExchange({
+              user,
+              conversationId,
+              userMessage: message,
+              assistantReply: reply,
+              toolCalls: [],
+              pendingWrites: conversation.pendingWrites,
+            });
+            return NextResponse.json({
+              session_id: conversationId,
+              reply,
+              tool_calls: [],
+              conversations: await listConversations(user),
+              confirmation_required: conversation.pendingWrites.length > 0,
+            });
+          }
+
+          const reply = "Activity created successfully.";
+          setPendingActivityDraft(conversationId, null);
+          await saveExchange({
+            user,
+            conversationId,
+            userMessage: message,
+            assistantReply: reply,
+            toolCalls: [],
+            pendingWrites: conversation.pendingWrites,
+          });
+          return NextResponse.json({
+            session_id: conversationId,
+            reply,
+            tool_calls: [],
+            conversations: await listConversations(user),
+            confirmation_required: conversation.pendingWrites.length > 0,
+          });
+        }
+      }
+
       const isReject =
         body.type === "reject_write" ||
         (body.type === "chat" && CANCEL_PATTERN.test(message));
       if (conversation.pendingWrites.length && isReject) {
         const reply = "Cancelled. No CRM data was changed.";
+        setPendingActivityDraft(conversationId, null);
         await saveExchange({
           user,
           conversationId,
@@ -210,6 +523,7 @@ export async function POST(req: NextRequest) {
           history,
           conversation.pendingWrites,
         );
+        setPendingActivityDraft(conversationId, null);
         await saveExchange({
           user,
           conversationId,
@@ -248,12 +562,15 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const previousContext = await getPreviousConversationContext(
-        user,
-        conversationId,
-      );
+      const useCrossConversationContext =
+        process.env.ACARSH_ENABLE_CROSS_CONVERSATION_CONTEXT === "1" &&
+        conversation.messages.length > 0;
+      const previousContext = useCrossConversationContext
+        ? await getPreviousConversationContext(user, conversationId)
+        : "";
       const result = await runAgent(user, history, message, previousContext);
       const pendingWrites = result.pendingWrites || [];
+      setPendingActivityDraft(conversationId, null);
       await saveExchange({
         user,
         conversationId,

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import {
+  buildLeadOwnerVisibilityClause,
+  hasGlobalLeadAccess,
+} from "@/app/api/lib/lead-access";
 
 function toStartOfDay(date: Date): Date {
   const d = new Date(date);
@@ -35,7 +39,8 @@ export async function GET(req: NextRequest) {
     }
 
     const pool = await getPool();
-    const isManager = authUser.roleId === 1;
+    const hasGlobalAccess = hasGlobalLeadAccess(authUser.roleId);
+    const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
 
     const query = req.nextUrl.searchParams;
     const requestedFrom = parseDateParam(query.get("from"));
@@ -84,7 +89,7 @@ export async function GET(req: NextRequest) {
 
     const whereClauses: string[] = ["la.ActivityDate BETWEEN ? AND ?"];
     const baseParams: (string | number | Date)[] = [fromDate, toDate];
-    const effectiveUserId = isManager ? requestedUserId : authUser.userId;
+    const effectiveUserId = hasGlobalAccess ? requestedUserId : null;
 
     if (requestedSourceRaw === "leads") {
       whereClauses.push("(at.Name IS NULL OR at.Name NOT IN ('Prospect', 'Account'))");
@@ -103,6 +108,9 @@ export async function GET(req: NextRequest) {
     if (effectiveUserId) {
       whereClauses.push("(la.CreatedBy = ? OR l.OwnerId = ?)");
       baseParams.push(effectiveUserId, effectiveUserId);
+    } else if (!hasGlobalAccess) {
+      whereClauses.push(visibility.clause);
+      baseParams.push(...visibility.params);
     }
 
     const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
@@ -183,7 +191,7 @@ export async function GET(req: NextRequest) {
         };
 
     const [userRows]: any = await pool.query(
-      isManager
+      hasGlobalAccess
         ? `
           SELECT DISTINCT UserId, UserName
           FROM Users
@@ -196,7 +204,7 @@ export async function GET(req: NextRequest) {
           WHERE UserId = ?
           LIMIT 1
         `,
-      isManager ? [] : [authUser.userId]
+      hasGlobalAccess ? [] : [authUser.userId]
     );
 
     const users = (userRows ?? []).map((u: any) => ({

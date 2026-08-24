@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "../../../../config/db";
 import { getAuthUser } from "../../lib/auth";
+import { buildLeadOwnerVisibilityClause } from "@/app/api/lib/lead-access";
 
 
   //  GET → FETCH ACCOUNT LEADS
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     const pool = await getPool();
 
-    const isAdmin = authUser.roleId === 1;
+    const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
     const baseQuery = `
       SELECT
         l.LeadId,
@@ -66,13 +67,13 @@ export async function GET(req: NextRequest) {
       LEFT JOIN LeadStatuses las
         ON latestActivity.StatusId = las.StatusId
       WHERE at.Name = 'Account'
-      ${isAdmin ? "" : "AND l.OwnerId = ?"}
+      AND ${visibility.clause}
       ORDER BY l.CreatedOn DESC
     `;
 
     const [rows]: any = await pool.query(
       baseQuery,
-      isAdmin ? [] : [authUser.userId]
+      visibility.params
     );
 
     const grouped: any = {};

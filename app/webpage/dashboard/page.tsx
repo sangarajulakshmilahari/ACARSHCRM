@@ -46,7 +46,7 @@ export default function DashboardPage() {
     prospects: 0,
     accounts: 0,
   });
-  const [isDarkTheme, setIsDarkTheme] = useState(false);
+  const isDarkTheme = false;
 
   const outreachDonutRef = useRef<HTMLCanvasElement>(null);
   const outreachBarRef = useRef<HTMLCanvasElement>(null);
@@ -93,18 +93,6 @@ export default function DashboardPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDarkTheme(mediaQuery.matches);
-
-    const onChange = (e: MediaQueryListEvent) => {
-      setIsDarkTheme(e.matches);
-    };
-
-    mediaQuery.addEventListener("change", onChange);
-    return () => mediaQuery.removeEventListener("change", onChange);
   }, []);
 
   const rollingMonths = useMemo(() => {
@@ -1097,67 +1085,6 @@ export default function DashboardPage() {
           color: #12B7C9;
         }
 
-        @media (prefers-color-scheme: dark) {
-          .dashboard-container {
-            background: #020617;
-          }
-          .dashboard-header,
-          .status-card,
-          .chart-card,
-          .mini-chart,
-          .conversion-progress {
-            background: #0f172a;
-            color: #e2e8f0;
-            border-color: #1e293b;
-            box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
-          }
-          .chart-header {
-            border-bottom-color: #1e293b;
-          }
-          .funnel-stage {
-            box-shadow: 0 10px 24px rgba(2, 6, 23, 0.4);
-          }
-          .funnel-kpi-pill {
-            background: #0f172a;
-            border-color: #1e293b;
-            box-shadow: 0 8px 20px rgba(2, 6, 23, 0.35);
-          }
-          .funnel-kpi-pill.accent {
-            background: linear-gradient(135deg, #312e81 0%, #134e4a 60%, #78350f 100%);
-            border-color: #334155;
-          }
-          .funnel-kpi-pill span,
-          .funnel-kpi-pill strong {
-            color: #e2e8f0;
-          }
-          .funnel-meta strong,
-          .funnel-count {
-            color: #e2e8f0;
-          }
-          .funnel-meta span,
-          .funnel-conversion {
-            color: #94a3b8;
-          }
-          .chart-subtitle,
-          .kpi span,
-          .percentage,
-          .conversion-head {
-            color: #94a3b8;
-          }
-          .kpi,
-          .mini-chart {
-            border-color: #1e293b;
-            background: #0f172a;
-          }
-          .kpi strong,
-          .mini-chart h4,
-          .status-content h4 {
-            color: #e2e8f0;
-          }
-          .track {
-            background: #1e293b;
-          }
-        }
       `}</style>
     </>
   );

@@ -337,7 +337,7 @@ export async function GET(
             SELECT
               CAST(e.employee_id AS CHAR(100)) AS EmployeeId,
               TRIM(e.name) AS EmployeeName
-            FROM aaram_db.employee e
+            FROM l_db.employee e
             WHERE COALESCE(TRIM(e.name), '') <> ''
               AND (
                 LOWER(TRIM(e.name)) LIKE LOWER(?)
@@ -410,7 +410,7 @@ export async function GET(
             FROM ProjectResources pr
             INNER JOIN Projects p
               ON p.ProjectId = pr.ProjectId
-            LEFT JOIN aaram_db.employee e
+            LEFT JOIN l_db.employee e
               ON TRIM(LOWER(CAST(e.employee_id AS CHAR(100)))) = TRIM(LOWER(CAST(pr.EmployeeId AS CHAR(100))))
             WHERE p.CustomerId = ?
               AND COALESCE(p.IsDeleted, 0) = 0

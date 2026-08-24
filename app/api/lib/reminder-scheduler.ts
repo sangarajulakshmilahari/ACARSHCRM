@@ -1,5 +1,15 @@
 function isSchedulerEnabled() {
-  return process.env.REMINDER_SCHEDULER_ENABLED === "true";
+  if (process.env.REMINDER_SCHEDULER_ENABLED !== "true") {
+    return false;
+  }
+
+  // Avoid dev-time route self-calls during Next HMR/compilation.
+  // This has caused unstable .next chunks and MODULE_NOT_FOUND crashes.
+  if (process.env.NODE_ENV !== "production") {
+    return process.env.REMINDER_SCHEDULER_ALLOW_IN_DEV === "true";
+  }
+
+  return true;
 }
 
 function getDispatchUrl() {
@@ -20,6 +30,13 @@ export function startReminderScheduler() {
   if (!isSchedulerEnabled()) {
     return;
   }
+
+  const globalKey = "__acarshReminderSchedulerStarted";
+  const globalState = globalThis as typeof globalThis & Record<string, any>;
+  if (globalState[globalKey]) {
+    return;
+  }
+  globalState[globalKey] = true;
 
   const intervalMs = Number(process.env.REMINDER_SCHEDULER_INTERVAL_MS || 60_000);
   const dispatchUrl = getDispatchUrl();

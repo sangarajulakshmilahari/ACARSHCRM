@@ -38,6 +38,16 @@ type Reminder = {
   Notification?: string;
 };
 
+type MeetingForm = {
+  subject: string;
+  attendees: Array<{ email: string; name: string }>;
+  startDateTime: string;
+  endDateTime: string;
+  agenda: string;
+  location: string;
+  sendEmail: boolean;
+};
+
 type Opportunity = {
   OpportunityId: number;
   ProjectId?: number | null;
@@ -93,6 +103,116 @@ type Project = {
     Email?: string | null;
     Phone?: string | null;
   }>;
+};
+
+type ProjectSowSummary = {
+  SOWId: number;
+  ProjectId: number | null;
+  SOWName: string;
+  Client: string;
+  FileName: string;
+  EffectiveDate?: string | null;
+  StartDate?: string | null;
+  EndDate?: string | null;
+  NumberOfPositions: number;
+  NumberOfResources: number;
+  UploadedOn?: string | null;
+  ParseStatus?: string | null;
+  ParseMessage?: string | null;
+  VersionNo?: number;
+  Status?: string | null;
+};
+
+type ProjectSowDetails = ProjectSowSummary & {
+  LinkedProjectLabel?: string;
+  EffectiveDate?: string | null;
+  ParseStatus?: string | null;
+  ParseMessage?: string | null;
+  IsCurrent?: boolean;
+  ReplacesSOWId?: number | null;
+  ReplacedBySOWId?: number | null;
+  Positions: Array<{
+    SOWPositionId: number;
+    SOWId?: number;
+    PositionNumber: number;
+    Role: string;
+    StartDate?: string | null;
+    EndDate?: string | null;
+    Resources: Array<{
+      SOWPositionResourceId: number;
+      SOWPositionId?: number;
+      Resource: string;
+      ResourceId?: number | null;
+      EmployeeCode?: string | null;
+      Location?: string | null;
+      BusinessHours?: string | null;
+      BillingStartDate?: string | null;
+      BillingEndDate?: string | null;
+      BillingRate?: number | null;
+      BudgetedHours?: number | null;
+      BudgetedFees?: number | null;
+      Currency?: string | null;
+      RateType?: string | null;
+      SOWRate?: number | null;
+      EndReason?: string | null;
+      StartDate?: string | null;
+      EndDate?: string | null;
+      [key: string]: any;
+    }>;
+  }>;
+  [key: string]: any;
+};
+
+type CustomerSowSummary = ProjectSowSummary & {
+  ProjectName?: string | null;
+  LinkedProjectLabel?: string;
+  IsCurrent?: boolean;
+  ReplacesSOWId?: number | null;
+  ReplacedBySOWId?: number | null;
+};
+
+type SOWResourceDraft = {
+  SOWPositionResourceId?: number;
+  Resource: string;
+  ResourceId: string;
+  EmployeeCode: string;
+  Location: string;
+  Role: string;
+  StartDate: string;
+  EndDate: string;
+  BusinessHours: string;
+  BillingStartDate: string;
+  BillingEndDate: string;
+  BillingRate: string;
+  BudgetedHours: string;
+  BudgetedFees: string;
+  Currency: string;
+  RateType: string;
+  SOWRate: string;
+  EndReason: string;
+};
+
+type SOWPositionDraft = {
+  SOWPositionId?: number;
+  PositionNumber: number;
+  Role: string;
+  StartDate: string;
+  EndDate: string;
+  expanded: boolean;
+  Resources: SOWResourceDraft[];
+};
+
+type CustomerSowEditDraft = {
+  SOWId: number;
+  SOWName: string;
+  Client: string;
+  Status: string;
+  EffectiveDate: string;
+  StartDate: string;
+  EndDate: string;
+  ParseStatus: string;
+  ParseMessage: string;
+  Positions: SOWPositionDraft[];
 };
 
 type EmployeeSuggestion = {
@@ -195,6 +315,7 @@ export default function LeadDetailsClient({
   const [error, setError] = useState<string | null>(null);
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [showAddReminder, setShowAddReminder] = useState(false);
+  const [showAddMeeting, setShowAddMeeting] = useState(false);
   const [showConvertMenu, setShowConvertMenu] = useState(false);
   const [showAddOpportunity, setShowAddOpportunity] = useState(false);
   const [otherTechnologyMap, setOtherTechnologyMap] = useState<
@@ -235,6 +356,26 @@ export default function LeadDetailsClient({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [showProjectSummary, setShowProjectSummary] = useState(false);
   const [projectSummaryLoading, setProjectSummaryLoading] = useState(false);
+  const [projectSowLoading, setProjectSowLoading] = useState(false);
+  const [projectSowUploadLoading, setProjectSowUploadLoading] = useState(false);
+  const [projectSow, setProjectSow] = useState<ProjectSowSummary | null>(null);
+  const [projectSowMessage, setProjectSowMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showProjectSowDetails, setShowProjectSowDetails] = useState(false);
+  const [projectSowDetailsLoading, setProjectSowDetailsLoading] = useState(false);
+  const [projectSowDetails, setProjectSowDetails] = useState<ProjectSowDetails | null>(null);
+  const [projectSowDetailsTab, setProjectSowDetailsTab] = useState<"overview" | "positions">("overview");
+  const [projectSowDetailsSearch, setProjectSowDetailsSearch] = useState("");
+  const [projectSowSelectedResourceKey, setProjectSowSelectedResourceKey] = useState<string | null>(null);
+  const sowFileInputRef = useRef<HTMLInputElement | null>(null);
+  const customerSowFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [customerSowsLoading, setCustomerSowsLoading] = useState(false);
+  const [customerSowUploadLoading, setCustomerSowUploadLoading] = useState(false);
+  const [customerSows, setCustomerSows] = useState<CustomerSowSummary[]>([]);
+  const [customerSowMessage, setCustomerSowMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showCustomerSowEditModal, setShowCustomerSowEditModal] = useState(false);
+  const [customerSowEditLoading, setCustomerSowEditLoading] = useState(false);
+  const [customerSowEditSaving, setCustomerSowEditSaving] = useState(false);
+  const [customerSowEditDraft, setCustomerSowEditDraft] = useState<CustomerSowEditDraft | null>(null);
   const [projectSummaryAccordions, setProjectSummaryAccordions] = useState({
     techStack: true,
     keyWork: true,
@@ -398,6 +539,28 @@ export default function LeadDetailsClient({
     Notification: "",
   });
 
+  const [meetingForm, setMeetingForm] = useState<MeetingForm>({
+    subject: "",
+    attendees: [{ email: "", name: "" }],
+    startDateTime: "",
+    endDateTime: "",
+    agenda: "",
+    location: "Online",
+    sendEmail: true,
+  });
+
+  const resetMeetingForm = () => {
+    setMeetingForm({
+      subject: "",
+      attendees: [{ email: "", name: "" }],
+      startDateTime: "",
+      endDateTime: "",
+      agenda: "",
+      location: "Online",
+      sendEmail: true,
+    });
+  };
+
   const toSqlDateTime = (input: string): string => {
     if (!input) return "";
     const normalized = input.includes("T") ? input.replace("T", " ") : input;
@@ -517,13 +680,15 @@ export default function LeadDetailsClient({
 
       const data = await res.json();
 
-      setLead({
+      setLead((prev) => ({
         ...data,
         Contacts: data.Contacts || [],
         Activities: data.Activities || [],
         Reminders: data.Reminders || [],
         Opportunities: data.Opportunities || [],
-      });
+        // Preserve already-loaded projects when this endpoint doesn't include them
+        Projects: data.Projects || prev?.Projects || [],
+      }));
     } catch (error) {
       console.error("Error fetching lead details:", error);
     }
@@ -602,6 +767,46 @@ export default function LeadDetailsClient({
 
   const formatDateTime = (value?: string) => {
     return formatLocaleDateTime(value, undefined, "—");
+  };
+
+  const formatActivityNotesForDisplay = (activity: Activity) => {
+    const raw = String(activity?.Notes || "").trim();
+    if (!raw) return "—";
+
+    const mode = String(activity?.Mode || "").trim().toLowerCase();
+    if (mode !== "meeting") return raw;
+
+    const attendeeMatch = raw.match(/Attendee:\s*([^\n<]+)/i);
+    const agendaMatch = raw.match(/Agenda:\s*([^\n]+)/i);
+    const subjectMatch = raw.match(/Meeting Subject:\s*([^\n]+)/i);
+
+    const attendee = attendeeMatch?.[1]?.trim();
+    const agenda = agendaMatch?.[1]?.trim();
+    const subject = subjectMatch?.[1]?.trim();
+    const dateText = formatDateTime(activity.ActivityDate);
+
+    const parts: string[] = [];
+    if (attendee) {
+      parts.push(`Had a meeting with ${attendee}`);
+    } else {
+      parts.push("Had a meeting");
+    }
+
+    if (dateText && dateText !== "—") {
+      parts.push(`on ${dateText}`);
+    }
+
+    let sentence = parts.join(" ");
+
+    if (subject && subject !== "-") {
+      sentence += `. Subject: ${subject}`;
+    }
+
+    if (agenda && agenda !== "-") {
+      sentence += `. Agenda: ${agenda}`;
+    }
+
+    return sentence;
   };
 
   const toDisplayValue = (value?: string | null) => {
@@ -713,6 +918,485 @@ export default function LeadDetailsClient({
     const endDate = project?.EndDate ?? selectedProject?.EndDate ?? null;
     if (!endDate) return "Ongoing";
     return formatProjectDate(endDate);
+  };
+
+  const formatSowDate = (value?: string | null, fallback = "Not Available") => {
+    if (!value) return fallback;
+    return formatLocaleDate(value, undefined, fallback);
+  };
+
+  const formatSowDuration = (sow?: ProjectSowSummary | null) => {
+    if (!sow) return "Not Available";
+    const start = formatSowDate(sow.StartDate || null);
+    const end = sow.EndDate ? formatSowDate(sow.EndDate) : "Ongoing";
+    if (start === "Not Available" && end === "Ongoing") return "Not Available";
+    return `${start} - ${end}`;
+  };
+
+  const toInputDate = (value?: string | null) => {
+    if (!value) return "";
+    const text = String(value);
+    return text.includes("T") ? text.split("T")[0] : text;
+  };
+
+  const toInputText = (value: any) => {
+    if (value === null || value === undefined) return "";
+    return String(value);
+  };
+
+  const resetProjectSowState = () => {
+    setProjectSow(null);
+    setProjectSowMessage(null);
+    setProjectSowDetails(null);
+    setShowProjectSowDetails(false);
+    setProjectSowDetailsTab("overview");
+    setProjectSowDetailsSearch("");
+    setProjectSowSelectedResourceKey(null);
+  };
+
+  const fetchProjectSow = async (projectId: number) => {
+    try {
+      setProjectSowLoading(true);
+      const res = await fetch(`/api/sow/${projectId}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch SOW");
+      }
+
+      const payload = await res.json();
+      setProjectSow(payload?.exists ? (payload.sow as ProjectSowSummary) : null);
+    } catch (error: any) {
+      setProjectSow(null);
+      setProjectSowMessage({
+        type: "error",
+        text: error?.message || "Failed to fetch Statement of Work",
+      });
+    } finally {
+      setProjectSowLoading(false);
+    }
+  };
+
+  const triggerSowUpload = () => {
+    if (!selectedProject?.ProjectId || projectSowUploadLoading) return;
+    setProjectSowMessage(null);
+    sowFileInputRef.current?.click();
+  };
+
+  const handleSowFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file || !selectedProject?.ProjectId) return;
+
+    if (!/\.docx$/i.test(file.name || "")) {
+      setProjectSowMessage({ type: "error", text: "Unsupported file type. Please upload a .docx file only." });
+      return;
+    }
+
+    try {
+      setProjectSowUploadLoading(true);
+      setProjectSowMessage(null);
+
+      const formData = new FormData();
+      formData.append("projectId", String(selectedProject.ProjectId));
+      formData.append("file", file);
+
+      const res = await fetch("/api/sow/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "SOW upload failed");
+      }
+
+      setProjectSowMessage({
+        type: "success",
+        text: payload?.message || "SOW uploaded and parsed successfully",
+      });
+      await fetchProjectSow(selectedProject.ProjectId);
+    } catch (error: any) {
+      setProjectSowMessage({
+        type: "error",
+        text: error?.message || "Failed to upload and parse Statement of Work",
+      });
+    } finally {
+      setProjectSowUploadLoading(false);
+    }
+  };
+
+  const handleDownloadSow = async () => {
+    if (!projectSow?.SOWId) return;
+    try {
+      const res = await fetch(`/api/sow/download/${projectSow.SOWId}`);
+      if (!res.ok) throw new Error("Failed to download SOW");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = projectSow.FileName || `SOW-${projectSow.SOWId}.docx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setProjectSowMessage({ type: "error", text: error?.message || "Failed to download SOW" });
+    }
+  };
+
+  const handleOpenSowDetails = async (sowId?: number | null) => {
+    const finalSowId = sowId ?? projectSow?.SOWId;
+    if (!finalSowId) return;
+    try {
+      setProjectSowDetailsLoading(true);
+      setProjectSowMessage(null);
+      const res = await fetch(`/api/sow/details/${finalSowId}`);
+      if (!res.ok) throw new Error("Failed to fetch SOW details");
+      const data = await res.json();
+      setProjectSowDetails(data as ProjectSowDetails);
+      setProjectSowDetailsTab("overview");
+      setProjectSowDetailsSearch("");
+      setProjectSowSelectedResourceKey(null);
+      setShowProjectSowDetails(true);
+    } catch (error: any) {
+      setProjectSowMessage({ type: "error", text: error?.message || "Failed to load SOW details" });
+    } finally {
+      setProjectSowDetailsLoading(false);
+    }
+  };
+
+  const fetchCustomerSows = async () => {
+    if (!effectiveLeadId) return;
+    try {
+      setCustomerSowsLoading(true);
+      const res = await fetch(`/api/sow/customer/${Number(effectiveLeadId)}`);
+      if (!res.ok) throw new Error("Failed to fetch customer SOWs");
+      const data = await res.json();
+      setCustomerSows(Array.isArray(data?.sows) ? (data.sows as CustomerSowSummary[]) : []);
+    } catch (error: any) {
+      setCustomerSowMessage({
+        type: "error",
+        text: error?.message || "Failed to fetch customer SOWs",
+      });
+      setCustomerSows([]);
+    } finally {
+      setCustomerSowsLoading(false);
+    }
+  };
+
+  const triggerCustomerSowUpload = () => {
+    if (customerSowUploadLoading) return;
+    setCustomerSowMessage(null);
+    customerSowFileInputRef.current?.click();
+  };
+
+  const handleCustomerSowFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file || !effectiveLeadId) return;
+    if (!/\.docx$/i.test(file.name || "")) {
+      setCustomerSowMessage({ type: "error", text: "Unsupported file type. Please upload a .docx file only." });
+      return;
+    }
+
+    try {
+      setCustomerSowUploadLoading(true);
+      setCustomerSowMessage(null);
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("customerName", String(lead?.CompanyName || ""));
+
+      const res = await fetch("/api/sow/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "SOW upload failed");
+      }
+
+      setCustomerSowMessage({
+        type: "success",
+        text: payload?.message || "SOW uploaded and parsed successfully",
+      });
+      await fetchCustomerSows();
+    } catch (error: any) {
+      setCustomerSowMessage({
+        type: "error",
+        text: error?.message || "Failed to upload and parse SOW",
+      });
+    } finally {
+      setCustomerSowUploadLoading(false);
+    }
+  };
+
+  const downloadSowById = async (sowId: number, fileName?: string | null) => {
+    const res = await fetch(`/api/sow/download/${sowId}`);
+    if (!res.ok) throw new Error("Failed to download SOW");
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName || `SOW-${sowId}.docx`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleCustomerDownloadSow = async (sow: CustomerSowSummary) => {
+    try {
+      await downloadSowById(sow.SOWId, sow.FileName);
+    } catch (error: any) {
+      setCustomerSowMessage({ type: "error", text: error?.message || "Failed to download SOW" });
+    }
+  };
+
+  const handleOpenCustomerSowDetails = async (sowId: number) => {
+    try {
+      await handleOpenSowDetails(sowId);
+    } catch (error: any) {
+      setCustomerSowMessage({ type: "error", text: error?.message || "Failed to load SOW details" });
+    }
+  };
+
+  const buildCustomerSowEditDraft = (details: ProjectSowDetails): CustomerSowEditDraft => {
+    return {
+      SOWId: Number(details.SOWId),
+      SOWName: toInputText(details.SOWName),
+      Client: toInputText(details.Client),
+      Status: toInputText(details.Status || "Active"),
+      EffectiveDate: toInputDate(details.EffectiveDate || null),
+      StartDate: toInputDate(details.StartDate || null),
+      EndDate: toInputDate(details.EndDate || null),
+      ParseStatus: toInputText(details.ParseStatus || ""),
+      ParseMessage: toInputText(details.ParseMessage || ""),
+      Positions: (details.Positions || []).map((position, idx) => ({
+        SOWPositionId: position.SOWPositionId,
+        PositionNumber: Number(position.PositionNumber || idx + 1),
+        Role: toInputText(position.Role),
+        StartDate: toInputDate(position.StartDate || null),
+        EndDate: toInputDate(position.EndDate || null),
+        expanded: true,
+        Resources: (position.Resources || []).map((resource) => ({
+          SOWPositionResourceId: resource.SOWPositionResourceId,
+          Resource: toInputText(resource.Resource),
+          ResourceId: toInputText(resource.ResourceId ?? ""),
+          EmployeeCode: toInputText(resource.EmployeeCode ?? ""),
+          Location: toInputText(resource.Location ?? ""),
+          Role: toInputText(position.Role),
+          StartDate: toInputDate(resource.StartDate || null),
+          EndDate: toInputDate(resource.EndDate || null),
+          BusinessHours: toInputText((resource as any).BusinessHours ?? ""),
+          BillingStartDate: toInputDate(resource.BillingStartDate || null),
+          BillingEndDate: toInputDate(resource.BillingEndDate || null),
+          BillingRate: toInputText(resource.BillingRate ?? ""),
+          BudgetedHours: toInputText((resource as any).BudgetedHours ?? ""),
+          BudgetedFees: toInputText((resource as any).BudgetedFees ?? ""),
+          Currency: toInputText(resource.Currency ?? ""),
+          RateType: toInputText(resource.RateType ?? ""),
+          SOWRate: toInputText(resource.SOWRate ?? ""),
+          EndReason: toInputText(resource.EndReason ?? ""),
+        })),
+      })),
+    };
+  };
+
+  const handleOpenCustomerSowEdit = async (sowId: number) => {
+    try {
+      setCustomerSowEditLoading(true);
+      setCustomerSowMessage(null);
+      const res = await fetch(`/api/sow/details/${sowId}`);
+      if (!res.ok) throw new Error("Failed to fetch SOW details");
+      const details = (await res.json()) as ProjectSowDetails;
+      setCustomerSowEditDraft(buildCustomerSowEditDraft(details));
+      setShowCustomerSowEditModal(true);
+    } catch (error: any) {
+      setCustomerSowMessage({ type: "error", text: error?.message || "Failed to load SOW for edit" });
+    } finally {
+      setCustomerSowEditLoading(false);
+    }
+  };
+
+  const handleSaveCustomerSowEdit = async () => {
+    if (!customerSowEditDraft?.SOWId) return;
+
+    try {
+      setCustomerSowEditSaving(true);
+
+      const payload = {
+        SOW: {
+          SOWName: customerSowEditDraft.SOWName.trim() || null,
+          Client: customerSowEditDraft.Client.trim() || null,
+          Status: customerSowEditDraft.Status.trim() || null,
+          EffectiveDate: customerSowEditDraft.EffectiveDate || null,
+          StartDate: customerSowEditDraft.StartDate || null,
+          EndDate: customerSowEditDraft.EndDate || null,
+          ParseStatus: customerSowEditDraft.ParseStatus.trim() || null,
+          ParseMessage: customerSowEditDraft.ParseMessage.trim() || null,
+        },
+        Positions: (customerSowEditDraft.Positions || []).map((position, index) => ({
+          SOWPositionId: position.SOWPositionId,
+          PositionNumber: Number(position.PositionNumber || index + 1),
+          Role: String(position.Role || "").trim() || null,
+          StartDate: position.StartDate || null,
+          EndDate: position.EndDate || null,
+          Resources: (position.Resources || []).map((resource) => ({
+            SOWPositionResourceId: resource.SOWPositionResourceId,
+            Resource: String(resource.Resource || "").trim() || null,
+            ResourceId: resource.ResourceId ? Number(resource.ResourceId) : null,
+            EmployeeCode: String(resource.EmployeeCode || "").trim() || null,
+            Location: String(resource.Location || "").trim() || null,
+            StartDate: resource.StartDate || null,
+            EndDate: resource.EndDate || null,
+            BusinessHours: String(resource.BusinessHours || "").trim() || null,
+            BillingStartDate: resource.BillingStartDate || null,
+            BillingEndDate: resource.BillingEndDate || null,
+            BillingRate: resource.BillingRate ? Number(resource.BillingRate) : null,
+            BudgetedHours: resource.BudgetedHours ? Number(resource.BudgetedHours) : null,
+            BudgetedFees: resource.BudgetedFees ? Number(resource.BudgetedFees) : null,
+            Currency: String(resource.Currency || "").trim() || null,
+            RateType: String(resource.RateType || "").trim() || null,
+            SOWRate: resource.SOWRate ? Number(resource.SOWRate) : null,
+            EndReason: String(resource.EndReason || "").trim() || null,
+          })),
+        })),
+      };
+
+      const res = await fetch(`/api/sow/details/${customerSowEditDraft.SOWId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(saved?.error || "Failed to save SOW details");
+      }
+
+      setCustomerSowMessage({ type: "success", text: "SOW details updated successfully" });
+      setShowCustomerSowEditModal(false);
+      setCustomerSowEditDraft(null);
+      await fetchCustomerSows();
+      if (projectSow?.SOWId === customerSowEditDraft.SOWId && selectedProject?.ProjectId) {
+        await fetchProjectSow(selectedProject.ProjectId);
+      }
+    } catch (error: any) {
+      setCustomerSowMessage({ type: "error", text: error?.message || "Failed to save SOW changes" });
+    } finally {
+      setCustomerSowEditSaving(false);
+    }
+  };
+
+  const updateCustomerSowDraft = (updater: (draft: CustomerSowEditDraft) => CustomerSowEditDraft) => {
+    setCustomerSowEditDraft((prev) => (prev ? updater(prev) : prev));
+  };
+
+  const updateCustomerSowPosition = (
+    positionIndex: number,
+    patch: Partial<SOWPositionDraft>
+  ) => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: draft.Positions.map((position, idx) =>
+        idx === positionIndex ? { ...position, ...patch } : position
+      ),
+    }));
+  };
+
+  const addCustomerSowPosition = () => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: [
+        ...draft.Positions,
+        {
+          PositionNumber: draft.Positions.length + 1,
+          Role: "",
+          StartDate: "",
+          EndDate: "",
+          expanded: true,
+          Resources: [],
+        },
+      ],
+    }));
+  };
+
+  const removeCustomerSowPosition = (positionIndex: number) => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: draft.Positions
+        .filter((_, idx) => idx !== positionIndex)
+        .map((position, idx) => ({ ...position, PositionNumber: idx + 1 })),
+    }));
+  };
+
+  const addCustomerSowResource = (positionIndex: number) => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: draft.Positions.map((position, idx) => {
+        if (idx !== positionIndex) return position;
+        return {
+          ...position,
+          Resources: [
+            ...position.Resources,
+            {
+              Resource: "",
+              ResourceId: "",
+              EmployeeCode: "",
+              Location: "",
+              Role: position.Role,
+              StartDate: "",
+              EndDate: "",
+              BusinessHours: "",
+              BillingStartDate: "",
+              BillingEndDate: "",
+              BillingRate: "",
+              BudgetedHours: "",
+              BudgetedFees: "",
+              Currency: "",
+              RateType: "",
+              SOWRate: "",
+              EndReason: "",
+            },
+          ],
+        };
+      }),
+    }));
+  };
+
+  const updateCustomerSowResource = (
+    positionIndex: number,
+    resourceIndex: number,
+    patch: Partial<SOWResourceDraft>
+  ) => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: draft.Positions.map((position, idx) => {
+        if (idx !== positionIndex) return position;
+        return {
+          ...position,
+          Resources: position.Resources.map((resource, rIdx) =>
+            rIdx === resourceIndex ? { ...resource, ...patch } : resource
+          ),
+        };
+      }),
+    }));
+  };
+
+  const removeCustomerSowResource = (positionIndex: number, resourceIndex: number) => {
+    updateCustomerSowDraft((draft) => ({
+      ...draft,
+      Positions: draft.Positions.map((position, idx) => {
+        if (idx !== positionIndex) return position;
+        return {
+          ...position,
+          Resources: position.Resources.filter((_, rIdx) => rIdx !== resourceIndex),
+        };
+      }),
+    }));
   };
 
   const formatPointsForEditor = (value?: string | null) => {
@@ -1066,6 +1750,7 @@ export default function LeadDetailsClient({
 
       const project = await res.json();
       setSelectedProject(project || null);
+      await fetchProjectSow(Number(project?.ProjectId || projectId));
       resetProjectSummaryAccordions();
       setShowProjectSummary(true);
     } catch (err) {
@@ -1130,6 +1815,63 @@ export default function LeadDetailsClient({
       setShowAddReminder(false);
     } catch (err: any) {
       alert(err.message || "Reminder save failed");
+    }
+  };
+
+  const handleSaveMeeting = async () => {
+    if (!meetingForm.subject || !meetingForm.startDateTime || !meetingForm.endDateTime) {
+      alert("Please fill all required meeting fields");
+      return;
+    }
+
+    const leadId = lead?.LeadId;
+    if (!leadId) {
+      alert("Invalid Lead");
+      return;
+    }
+
+    try {
+      // Filter out empty attendees (both email and name empty)
+      const validAttendees = meetingForm.attendees.filter(
+        (attendee) => attendee.email.trim() !== "" || attendee.name.trim() !== ""
+      );
+      if (validAttendees.length === 0) {
+        alert("Please add at least one attendee with email or name");
+        return;
+      }
+
+      const res = await fetch(`/api/employees/leads/${leadId}/meetings/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: meetingForm.subject,
+          attendees: validAttendees,
+          startDateTime: toSqlDateTime(meetingForm.startDateTime).replace(" ", "T"),
+          endDateTime: toSqlDateTime(meetingForm.endDateTime).replace(" ", "T"),
+          agenda: meetingForm.agenda,
+          location: meetingForm.location,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
+          sendEmail: meetingForm.sendEmail,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to schedule meeting");
+      }
+
+      const data = await res.json();
+      const meetingUrl =
+        data?.event?.onlineMeetingUrl ||
+        data?.event?.webLink ||
+        "Meeting scheduled";
+
+      alert(`Meeting scheduled successfully. Link: ${meetingUrl}`);
+      setShowAddMeeting(false);
+      resetMeetingForm();
+      fetchLeadDetails();
+    } catch (err: any) {
+      alert(err?.message || "Meeting scheduling failed");
     }
   };
 
@@ -1568,6 +2310,14 @@ export default function LeadDetailsClient({
   }, [effectiveLeadId]);
 
   useEffect(() => {
+    if ((lead?.AccountTypeId ?? 0) < 30) {
+      setCustomerSows([]);
+      return;
+    }
+    fetchCustomerSows();
+  }, [effectiveLeadId, lead?.AccountTypeId]);
+
+  useEffect(() => {
     if (!effectiveLeadId) {
       setLead(null);
       return;
@@ -1730,6 +2480,23 @@ export default function LeadDetailsClient({
     color: "#F26522",
     cursor: "pointer",
     fontWeight: 600,
+  };
+
+  const primaryBtnStyle: React.CSSProperties = {
+    ...primaryBtn,
+    padding: "7px 12px",
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 700,
+    boxShadow: "none",
+  };
+
+  const secondaryBtnStyle: React.CSSProperties = {
+    ...secondaryBtn,
+    padding: "7px 12px",
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 700,
   };
 
   const rowStyle: React.CSSProperties = {
@@ -2006,6 +2773,52 @@ export default function LeadDetailsClient({
     fontSize: 13,
     fontWeight: 600,
   };
+
+  const sowHasValue = (value: any) => {
+    if (value === null || value === undefined) return false;
+    const text = String(value).trim();
+    return !!text && text.toLowerCase() !== "not available";
+  };
+
+  const sowResourceRows = (projectSowDetails?.Positions || []).flatMap((position, pIndex) => {
+    const resources = position.Resources || [];
+    if (resources.length === 0) {
+      return [
+        {
+          key: `pos-${position.SOWPositionId || pIndex}-empty`,
+          position,
+          resource: null as ProjectSowDetails["Positions"][number]["Resources"][number] | null,
+          index: pIndex,
+        },
+      ];
+    }
+    return resources.map((resource, rIndex) => ({
+      key: `res-${resource.SOWPositionResourceId || `${position.SOWPositionId || pIndex}-${rIndex}`}`,
+      position,
+      resource,
+      index: pIndex,
+    }));
+  });
+
+  const filteredSowResourceRows = sowResourceRows.filter((row) => {
+    const q = projectSowDetailsSearch.trim().toLowerCase();
+    if (!q) return true;
+    const joined = [
+      String(row.position.PositionNumber || ""),
+      row.position.Role || "",
+      row.resource?.Resource || "",
+      row.resource?.EmployeeCode || "",
+      row.resource?.Location || "",
+      row.resource?.BusinessHours || "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    return joined.includes(q);
+  });
+
+  const selectedSowResourceRow = filteredSowResourceRows.find(
+    (row) => row.key === projectSowSelectedResourceKey
+  ) || null;
 
   // MAIN RENDER
 
@@ -2414,10 +3227,24 @@ export default function LeadDetailsClient({
       </div>
 
       {/* Activities */}
-      <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
-        Activities
-        <button style={addBtn} onClick={openActivityFromGlobal}>
-          +
+      <div
+        style={{
+          ...sectionTitle,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <span>Activities</span>
+          <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
+            <button style={addBtn} onClick={openActivityFromGlobal}>
+              +
+            </button>
+          </div>
+        </div>
+        <button style={primaryBtn} onClick={() => setShowAddMeeting(true)}>
+          Schedule Meeting
         </button>
       </div>
 
@@ -2504,7 +3331,7 @@ export default function LeadDetailsClient({
                       }}
                     />
                   ) : (
-                    a.Notes || "—"
+                    formatActivityNotesForDisplay(a)
                   )}
                 </td>
 
@@ -2771,6 +3598,150 @@ export default function LeadDetailsClient({
         </table>
       </div>
 
+      {(lead?.AccountTypeId ?? 0) >= 30 && (
+        <>
+          <div
+            style={{
+              ...sectionTitle,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 24,
+              marginBottom: 10,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>SOWs</span>
+              <button
+                type="button"
+                onClick={() => triggerCustomerSowUpload()}
+                disabled={customerSowUploadLoading}
+                style={{
+                ...primaryBtn,
+                padding: "7px 12px",
+                fontSize: 13,
+                opacity: customerSowUploadLoading ? 0.7 : 1,
+              }}
+            >
+              {customerSowUploadLoading ? "Uploading..." : "+ Add SOW"}
+            </button>
+          </div>
+
+          {customerSowMessage && (
+            <div
+              style={{
+                marginBottom: 10,
+                fontSize: 12,
+                fontWeight: 600,
+                color: customerSowMessage.type === "success" ? "#166534" : "#b91c1c",
+                background: customerSowMessage.type === "success" ? "#dcfce7" : "#fee2e2",
+                border: `1px solid ${customerSowMessage.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                borderRadius: 6,
+                padding: "8px 10px",
+              }}
+            >
+              {customerSowMessage.text}
+            </div>
+          )}
+
+          <div style={tableWrap}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "separate",
+                borderSpacing: 0,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, width: 220 }}>SOW Name</th>
+                  <th style={{ ...thStyle, width: 170 }}>Client</th>
+                  <th style={{ ...thStyle, width: 150 }}>Start Date</th>
+                  <th style={{ ...thStyle, width: 150 }}>End Date</th>
+                  <th style={{ ...thStyle, width: 110 }}>Version</th>
+                  <th style={{ ...thStyle, width: 130 }}>Status</th>
+                  <th style={{ ...thStyle, width: 210 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerSowsLoading ? (
+                  <tr>
+                    <td colSpan={7} style={{ ...tdStyle, textAlign: "center", color: "#64748b" }}>
+                      Loading SOWs...
+                    </td>
+                  </tr>
+                ) : customerSows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ ...tdStyle, textAlign: "center", color: "#64748b" }}>
+                      No SOWs found for this customer.
+                    </td>
+                  </tr>
+                ) : (
+                  customerSows.map((sow) => (
+                    <tr key={`customer-sow-${sow.SOWId}`}>
+                      <td style={tdStyle}>{toDisplayValue(sow.SOWName)}</td>
+                      <td style={tdStyle}>{toDisplayValue(sow.Client)}</td>
+                      <td style={tdStyle}>{formatSowDate(sow.StartDate || null)}</td>
+                      <td style={tdStyle}>{sow.EndDate ? formatSowDate(sow.EndDate) : "Ongoing"}</td>
+                      <td style={tdStyle}>v{Number(sow.VersionNo || 1)}</td>
+                      <td style={tdStyle}>
+                        <span
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            backgroundColor: sow.IsCurrent ? "#dbeafe" : "#f3f4f6",
+                            color: sow.IsCurrent ? "#1d4ed8" : "#374151",
+                          }}
+                        >
+                          {toDisplayValue(sow.Status || (sow.IsCurrent ? "Current" : "Historical"))}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCustomerSowDetails(sow.SOWId)}
+                            style={secondaryBtnStyle}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCustomerSowEdit(sow.SOWId)}
+                            disabled={customerSowEditLoading}
+                            style={secondaryBtnStyle}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCustomerDownloadSow(sow)}
+                            style={secondaryBtnStyle}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <input
+            ref={customerSowFileInputRef}
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            style={{ display: "none" }}
+            onChange={handleCustomerSowFileChange}
+          />
+        </>
+      )}
+
       {/* Projects Section - Only for Customers (AccountTypeId >= 30) */}
       {(lead?.AccountTypeId ?? 0) >= 30 && (
         <>
@@ -2968,7 +3939,10 @@ export default function LeadDetailsClient({
                   backdropFilter: "blur(4px)",
                   WebkitBackdropFilter: "blur(4px)",
                 }}
-                onClick={() => setShowProjectSummary(false)}
+                onClick={() => {
+                  setShowProjectSummary(false);
+                  resetProjectSowState();
+                }}
               >
                 <div
                   style={{
@@ -3005,7 +3979,11 @@ export default function LeadDetailsClient({
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button
-                      onClick={() => setShowProjectSummary(false)}
+                      onClick={() => {
+                        setShowProjectSummary(false);
+                        resetProjectSowState();
+                      }}
+                      
                       style={{
                         background: "transparent",
                         border: "none",
@@ -3045,6 +4023,111 @@ export default function LeadDetailsClient({
                     <div style={{ marginTop: 6, color: "#0f172a", lineHeight: 1.5 }}>
                       {toDisplayValue(selectedProject.ProjectDesc)}
                     </div>
+                  </section>
+
+                  <section
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      boxShadow: "0 2px 8px rgba(15, 23, 42, 0.06)",
+                      gridColumn: "1 / -1",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Statement of Work
+                      </div>
+                      {(projectSowLoading || projectSowUploadLoading) && (
+                        <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 600 }}>
+                          {projectSowUploadLoading ? "Uploading & Parsing..." : "Loading..."}
+                        </div>
+                      )}
+                    </div>
+
+                    {projectSowMessage && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: projectSowMessage.type === "success" ? "#166534" : "#b91c1c",
+                          background: projectSowMessage.type === "success" ? "#dcfce7" : "#fee2e2",
+                          border: `1px solid ${projectSowMessage.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                          borderRadius: 6,
+                          padding: "6px 8px",
+                        }}
+                      >
+                        {projectSowMessage.text}
+                      </div>
+                    )}
+
+                    {!projectSow && !projectSowLoading ? (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ color: "#64748b", fontSize: 13 }}>No Statement of Work uploaded.</div>
+                        <button
+                          type="button"
+                          onClick={() => triggerSowUpload(false)}
+                          disabled={projectSowUploadLoading}
+                          style={{
+                            marginTop: 8,
+                            border: "1px solid #F26522",
+                            color: "#F26522",
+                            background: "#fff",
+                            borderRadius: 6,
+                            padding: "7px 12px",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: projectSowUploadLoading ? "not-allowed" : "pointer",
+                            opacity: projectSowUploadLoading ? 0.6 : 1,
+                          }}
+                        >
+                          Upload SOW
+                        </button>
+                      </div>
+                    ) : projectSow ? (
+                      <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>SOW File Name:</strong> {toDisplayValue(projectSow.FileName)}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Client:</strong> {toDisplayValue(projectSow.Client)}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Duration:</strong> {formatSowDuration(projectSow)}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Version:</strong> v{Number(projectSow.VersionNo || 1)}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Positions:</strong> {projectSow.NumberOfPositions ?? 0}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Resources:</strong> {projectSow.NumberOfResources ?? 0}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Uploaded On:</strong> {formatSowDate(projectSow.UploadedOn || null)}</div>
+                        <div style={{ fontSize: 13, color: "#0f172a" }}><strong>Status:</strong> {toDisplayValue(projectSow.Status || projectSow.ParseStatus || "Active")}</div>
+
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSowDetails()}
+                            disabled={projectSowDetailsLoading}
+                            style={secondaryBtnStyle}
+                          >
+                            {projectSowDetailsLoading ? "Loading..." : "View Details"}
+                          </button>
+                          <button type="button" onClick={handleDownloadSow} style={secondaryBtnStyle}>
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <input
+                      ref={sowFileInputRef}
+                      type="file"
+                      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      style={{ display: "none" }}
+                      onChange={handleSowFileChange}
+                    />
                   </section>
 
                   <section
@@ -3335,7 +4418,10 @@ export default function LeadDetailsClient({
                     }}
                   >
                     <button
-                      onClick={() => setShowProjectSummary(false)}
+                      onClick={() => {
+                        setShowProjectSummary(false);
+                        resetProjectSowState();
+                      }}
                       style={{
                         border: "1px solid #cbd5e1",
                         background: "#fff",
@@ -3351,6 +4437,410 @@ export default function LeadDetailsClient({
                     </button>
                   </section>
                 </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {showProjectSowDetails && projectSowDetails && typeof window !== "undefined" &&
+            createPortal(
+              <div
+                style={{ ...modalOverlay, zIndex: 10003, backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)" }}
+                onClick={() => {
+                  setShowProjectSowDetails(false);
+                  setProjectSowSelectedResourceKey(null);
+                  setProjectSowDetailsSearch("");
+                }}
+              >
+                <div
+                  style={{
+                    background: "#fff",
+                    width: "min(1220px, 97vw)",
+                    maxHeight: "90vh",
+                    borderRadius: 12,
+                    border: "1px solid rgba(31, 58, 104, 0.22)",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    style={{
+                      ...modalHeader,
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 3,
+                      background: "linear-gradient(90deg, #1F3A68 0%, #2f4d82 60%, #3f5f96 100%)",
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <div style={{ fontSize: 17, fontWeight: 700 }}>Statement of Work Details</div>
+                        <div style={{ fontSize: 12, opacity: 0.95 }}>
+                          {toDisplayValue(projectSowDetails.SOWName)} • {toDisplayValue(projectSowDetails.Client)}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowProjectSowDetails(false);
+                            triggerSowUpload();
+                          }}
+                          disabled={projectSowUploadLoading}
+                          style={primaryBtnStyle}
+                        >
+                          {projectSowUploadLoading ? "Uploading..." : "Upload New SOW"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadSowById(Number(projectSowDetails.SOWId), projectSowDetails.FileName || null)}
+                          style={secondaryBtnStyle}
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowProjectSowDetails(false)}
+                          style={{ ...secondaryBtnStyle, borderColor: "#ffffff66", color: "#fff", background: "transparent" }}
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ padding: 12, borderBottom: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    {([
+                      { key: "overview", label: "Overview" },
+                      { key: "positions", label: "Positions & Resources" },
+                    ] as Array<{ key: "overview" | "positions"; label: string }>).map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setProjectSowDetailsTab(tab.key)}
+                        style={{
+                          border: "1px solid #d3dbe7",
+                          background: projectSowDetailsTab === tab.key ? "#1F3A68" : "#fff",
+                          color: projectSowDetailsTab === tab.key ? "#fff" : "#334155",
+                          borderRadius: 999,
+                          padding: "7px 14px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ padding: 14, display: "grid", gap: 12, overflowY: "auto" }}>
+                    {projectSowDetailsTab === "overview" && (
+                      <>
+                        <section style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, background: "#fff" }}>
+                          <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>
+                            Snapshot
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+                            {[
+                              { label: "Positions", value: String(Number(projectSowDetails.NumberOfPositions || 0)) },
+                              { label: "Resources", value: String(Number(projectSowDetails.NumberOfResources || 0)) },
+                              { label: "Status", value: projectSowDetails.Status || "Active" },
+                              { label: "Duration", value: formatSowDuration(projectSowDetails) },
+                            ].map((item) => (
+                              <div key={item.label} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", background: "#f8fafc" }}>
+                                <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{item.label}</div>
+                                <div style={{ marginTop: 2, fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+
+                        <section style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, background: "#fff" }}>
+                          <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>
+                            SOW Information
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                            {[
+                              { label: "SOW Name", value: projectSowDetails.SOWName },
+                              { label: "Client", value: projectSowDetails.Client },
+                              { label: "Effective Date", value: projectSowDetails.EffectiveDate ? formatSowDate(projectSowDetails.EffectiveDate) : null },
+                              { label: "Start Date", value: projectSowDetails.StartDate ? formatSowDate(projectSowDetails.StartDate) : null },
+                              { label: "End Date", value: projectSowDetails.EndDate ? formatSowDate(projectSowDetails.EndDate) : "Ongoing" },
+                              { label: "Uploaded On", value: projectSowDetails.UploadedOn ? formatSowDate(projectSowDetails.UploadedOn) : null },
+                              { label: "Document Name", value: projectSowDetails.FileName || null },
+                              { label: "Parse Status", value: projectSowDetails.ParseStatus || null },
+                            ]
+                              .filter((item) => sowHasValue(item.value))
+                              .map((item) => (
+                                <div key={item.label} style={{ border: "1px dashed #d3dbe7", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{item.label}</div>
+                                  <div style={{ marginTop: 2, fontSize: 13, color: "#0f172a", wordBreak: "break-word" }}>{String(item.value)}</div>
+                                </div>
+                              ))}
+                          </div>
+                          {sowHasValue(projectSowDetails.ParseMessage) && (
+                            <div style={{ marginTop: 10, border: "1px solid #dbeafe", background: "#eff6ff", borderRadius: 8, padding: "8px 10px", color: "#1e3a8a", fontSize: 12 }}>
+                              {projectSowDetails.ParseMessage}
+                            </div>
+                          )}
+                        </section>
+                      </>
+                    )}
+
+                    {projectSowDetailsTab === "positions" && (
+                      <section style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12, background: "#fff" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                            Resourcing Plan
+                          </div>
+                          <div style={{ position: "relative", width: "min(380px, 100%)" }}>
+                            <span style={{ position: "absolute", left: 10, top: 9, color: "#94a3b8", pointerEvents: "none", display: "inline-flex" }}>
+                              <Search size={14} />
+                            </span>
+                            <input
+                              value={projectSowDetailsSearch}
+                              onChange={(e) => setProjectSowDetailsSearch(e.target.value)}
+                              placeholder="Search role, resource, code, location..."
+                              style={{ ...inputBox, width: "100%", paddingLeft: 30, height: 32, background: "#f8fafc" }}
+                            />
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 10,
+                            display: "grid",
+                            gridTemplateColumns: selectedSowResourceRow ? "1fr 330px" : "1fr",
+                            gap: 10,
+                            alignItems: "start",
+                          }}
+                        >
+                          <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                            <div style={{ maxHeight: "54vh", overflow: "auto" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                <thead>
+                                  <tr style={{ background: "#f8fafc" }}>
+                                    <th style={oppTh}>Position #</th>
+                                    <th style={oppTh}>Role</th>
+                                    <th style={oppTh}>Resource</th>
+                                    <th style={oppTh}>Employee Code</th>
+                                    <th style={oppTh}>Location</th>
+                                    <th style={oppTh}>Duration</th>
+                                    <th style={{ ...oppTh, width: 90 }}>Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {filteredSowResourceRows.map((row) => (
+                                    <tr key={row.key} style={{ background: projectSowSelectedResourceKey === row.key ? "#fff7ed" : "#fff" }}>
+                                      <td style={oppTd}>{Number(row.position.PositionNumber || 0)}</td>
+                                      <td style={oppTd}>{toDisplayValue(row.position.Role)}</td>
+                                      <td style={oppTd}>{row.resource ? toDisplayValue(row.resource.Resource) : "—"}</td>
+                                      <td style={oppTd}>{row.resource ? toDisplayValue(row.resource.EmployeeCode || null) : "—"}</td>
+                                      <td style={oppTd}>{row.resource ? toDisplayValue(row.resource.Location || null) : "—"}</td>
+                                      <td style={oppTd}>
+                                        {formatSowDate(row.position.StartDate || null)} - {row.position.EndDate ? formatSowDate(row.position.EndDate) : "Ongoing"}
+                                      </td>
+                                      <td style={{ ...oppTd, textAlign: "center" }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setProjectSowSelectedResourceKey(row.key)}
+                                          style={secondaryBtnStyle}
+                                        >
+                                          View
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {filteredSowResourceRows.length === 0 && (
+                                    <tr>
+                                      <td colSpan={7} style={{ ...oppTd, textAlign: "center", color: "#64748b" }}>
+                                        No matching rows found.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          {selectedSowResourceRow && (
+                            <aside style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#f8fafc", position: "sticky", top: 0 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>
+                                  Resource Details
+                                </div>
+                                <button type="button" onClick={() => setProjectSowSelectedResourceKey(null)} style={{ ...secondaryBtnStyle, padding: "4px 9px" }}>
+                                  Close
+                                </button>
+                              </div>
+
+                              <div style={{ marginTop: 8, display: "grid", gap: 7 }}>
+                                {[
+                                  { label: "Position", value: `#${Number(selectedSowResourceRow.position.PositionNumber || 0)}` },
+                                  { label: "Role", value: selectedSowResourceRow.position.Role || null },
+                                  { label: "Resource", value: selectedSowResourceRow.resource?.Resource || null },
+                                  { label: "Employee Code", value: selectedSowResourceRow.resource?.EmployeeCode || null },
+                                  { label: "Resource ID", value: selectedSowResourceRow.resource?.ResourceId ?? null },
+                                  { label: "Location", value: selectedSowResourceRow.resource?.Location || null },
+                                  { label: "Business Hours", value: selectedSowResourceRow.resource?.BusinessHours || null },
+                                  { label: "Start Date", value: selectedSowResourceRow.resource?.StartDate ? formatSowDate(selectedSowResourceRow.resource.StartDate) : null },
+                                  { label: "End Date", value: selectedSowResourceRow.resource?.EndDate ? formatSowDate(selectedSowResourceRow.resource.EndDate) : null },
+                                  { label: "Billing Start", value: selectedSowResourceRow.resource?.BillingStartDate ? formatSowDate(selectedSowResourceRow.resource.BillingStartDate) : null },
+                                  { label: "Billing End", value: selectedSowResourceRow.resource?.BillingEndDate ? formatSowDate(selectedSowResourceRow.resource.BillingEndDate) : null },
+                                  { label: "Billing Rate", value: selectedSowResourceRow.resource?.BillingRate ?? null },
+                                  { label: "Budgeted Hours", value: selectedSowResourceRow.resource?.BudgetedHours ?? null },
+                                  { label: "Budgeted Fees", value: selectedSowResourceRow.resource?.BudgetedFees ?? null },
+                                  { label: "Currency", value: selectedSowResourceRow.resource?.Currency || null },
+                                  { label: "Rate Type", value: selectedSowResourceRow.resource?.RateType || null },
+                                  { label: "SOW Rate", value: selectedSowResourceRow.resource?.SOWRate ?? null },
+                                  { label: "End Reason", value: selectedSowResourceRow.resource?.EndReason || null },
+                                ]
+                                  .filter((item) => sowHasValue(item.value))
+                                  .map((item) => (
+                                    <div key={item.label} style={{ borderBottom: "1px dashed #d3dbe7", paddingBottom: 6 }}>
+                                      <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{item.label}</div>
+                                      <div style={{ marginTop: 2, fontSize: 13, color: "#0f172a", wordBreak: "break-word" }}>{String(item.value)}</div>
+                                    </div>
+                                  ))}
+                              </div>
+                            </aside>
+                          )}
+                        </div>
+                      </section>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => {
+                          setShowProjectSowDetails(false);
+                          setProjectSowSelectedResourceKey(null);
+                          setProjectSowDetailsSearch("");
+                        }}
+                        style={secondaryBtnStyle}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {showCustomerSowEditModal && customerSowEditDraft && typeof window !== "undefined" &&
+            createPortal(
+              <div style={{ ...modalOverlay, zIndex: 10004 }} onClick={() => setShowCustomerSowEditModal(false)}>
+                <div
+                  style={{
+                    background: "#fff",
+                    width: "min(1080px, 97vw)",
+                    maxHeight: "90vh",
+                    overflowY: "auto",
+                    borderRadius: 10,
+                    border: "1px solid rgba(31, 58, 104, 0.22)",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.22)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ ...modalHeader, position: "sticky", top: 0, zIndex: 2 }}>Edit SOW</div>
+                  <div style={{ padding: 14, display: "grid", gap: 12 }}>
+                    <div
+                      style={{
+                        background: "#fffbeb",
+                        border: "1px solid #fde68a",
+                        color: "#92400e",
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                        fontSize: 13,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      Edit updates system data only; upload a new SOW document when the source file changes.
+                    </div>
+
+                    <section style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>SOW Details</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+                        <input style={{ ...inputBox, width: "100%" }} placeholder="SOW Name" value={customerSowEditDraft.SOWName} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, SOWName: e.target.value }))} />
+                        <input style={{ ...inputBox, width: "100%" }} placeholder="Client" value={customerSowEditDraft.Client} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, Client: e.target.value }))} />
+                        <input style={{ ...inputBox, width: "100%" }} placeholder="Status" value={customerSowEditDraft.Status} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, Status: e.target.value }))} />
+                        <input type="date" style={{ ...inputBox, width: "100%" }} value={customerSowEditDraft.EffectiveDate} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, EffectiveDate: e.target.value }))} />
+                        <input type="date" style={{ ...inputBox, width: "100%" }} value={customerSowEditDraft.StartDate} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, StartDate: e.target.value }))} />
+                        <input type="date" style={{ ...inputBox, width: "100%" }} value={customerSowEditDraft.EndDate} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, EndDate: e.target.value }))} />
+                        <input style={{ ...inputBox, width: "100%" }} placeholder="Parse Status" value={customerSowEditDraft.ParseStatus} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, ParseStatus: e.target.value }))} />
+                        <input style={{ ...inputBox, width: "100%", gridColumn: "span 2" }} placeholder="Parse Message" value={customerSowEditDraft.ParseMessage} onChange={(e) => updateCustomerSowDraft((d) => ({ ...d, ParseMessage: e.target.value }))} />
+                      </div>
+                    </section>
+
+                    <section style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>Positions & Resources</div>
+                        <button type="button" style={secondaryBtnStyle} onClick={addCustomerSowPosition}>+ Add Position</button>
+                      </div>
+
+                      <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                        {customerSowEditDraft.Positions.map((position, pIdx) => (
+                          <div key={`edit-position-${position.SOWPositionId ?? pIdx}`} style={{ border: "1px solid #dbe3ef", borderRadius: 8, padding: 8, background: "#f8fafc" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 140px 140px auto", gap: 8, alignItems: "center" }}>
+                              <input type="number" style={{ ...inputBox, width: "100%" }} value={position.PositionNumber} onChange={(e) => updateCustomerSowPosition(pIdx, { PositionNumber: Number(e.target.value || pIdx + 1) })} />
+                              <input style={{ ...inputBox, width: "100%" }} placeholder="Role" value={position.Role} onChange={(e) => updateCustomerSowPosition(pIdx, { Role: e.target.value })} />
+                              <input type="date" style={{ ...inputBox, width: "100%" }} value={position.StartDate} onChange={(e) => updateCustomerSowPosition(pIdx, { StartDate: e.target.value })} />
+                              <input type="date" style={{ ...inputBox, width: "100%" }} value={position.EndDate} onChange={(e) => updateCustomerSowPosition(pIdx, { EndDate: e.target.value })} />
+                              <button type="button" style={{ ...cancelBtn, height: 36 }} onClick={() => removeCustomerSowPosition(pIdx)}>Remove</button>
+                            </div>
+
+                            <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                              {position.Resources.map((resource, rIdx) => (
+                                <div key={`edit-resource-${resource.SOWPositionResourceId ?? `${pIdx}-${rIdx}`}`} style={{ border: "1px dashed #cbd5e1", borderRadius: 8, padding: 8, background: "#fff" }}>
+                                  <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Resource Name" value={resource.Resource} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { Resource: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Employee Code" value={resource.EmployeeCode} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { EmployeeCode: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Resource ID" value={resource.ResourceId} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { ResourceId: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Location" value={resource.Location} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { Location: e.target.value })} />
+                                    <button type="button" style={{ ...cancelBtn, height: 36 }} onClick={() => removeCustomerSowResource(pIdx, rIdx)}>Remove</button>
+                                  </div>
+
+                                  <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 8 }}>
+                                    <input type="date" style={{ ...inputBox, width: "100%" }} value={resource.StartDate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { StartDate: e.target.value })} />
+                                    <input type="date" style={{ ...inputBox, width: "100%" }} value={resource.EndDate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { EndDate: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Business Hours" value={resource.BusinessHours} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BusinessHours: e.target.value })} />
+                                    <input type="date" style={{ ...inputBox, width: "100%" }} value={resource.BillingStartDate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BillingStartDate: e.target.value })} />
+                                    <input type="date" style={{ ...inputBox, width: "100%" }} value={resource.BillingEndDate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BillingEndDate: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Billing Rate" value={resource.BillingRate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BillingRate: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Budgeted Hours" value={resource.BudgetedHours} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BudgetedHours: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Budgeted Fees" value={resource.BudgetedFees} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { BudgetedFees: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Currency" value={resource.Currency} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { Currency: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="Rate Type" value={resource.RateType} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { RateType: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%" }} placeholder="SOW Rate" value={resource.SOWRate} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { SOWRate: e.target.value })} />
+                                    <input style={{ ...inputBox, width: "100%", gridColumn: "span 2" }} placeholder="End Reason" value={resource.EndReason} onChange={(e) => updateCustomerSowResource(pIdx, rIdx, { EndReason: e.target.value })} />
+                                  </div>
+                                </div>
+                              ))}
+
+                              <div>
+                                <button type="button" style={secondaryBtnStyle} onClick={() => addCustomerSowResource(pIdx)}>
+                                  + Add Resource
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                      <button type="button" style={secondaryBtnStyle} onClick={() => setShowCustomerSowEditModal(false)}>
+                        Cancel
+                      </button>
+                      <button type="button" style={primaryBtnStyle} onClick={handleSaveCustomerSowEdit} disabled={customerSowEditSaving}>
+                        {customerSowEditSaving ? "Saving..." : "Save SOW"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>,
               document.body
@@ -4231,6 +5721,204 @@ export default function LeadDetailsClient({
 
               <button style={saveBtn} onClick={handleSaveReminder}>
                 Save Reminder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCHEDULE MEETING MODAL */}
+      {showAddMeeting && (
+        <div
+          style={modalOverlay}
+          onClick={() => {
+            setShowAddMeeting(false);
+            resetMeetingForm();
+          }}
+        >
+          <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+            <div
+              style={{
+                ...modalHeader,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span>Schedule Meeting</span>
+              <span
+                style={{ cursor: "pointer", fontSize: 22 }}
+                onClick={() => {
+                  setShowAddMeeting(false);
+                  resetMeetingForm();
+                }}
+              >
+                ✕
+              </span>
+            </div>
+
+            <div style={modalBody}>
+              <label>Subject*</label>
+              <input
+                style={{ ...inputBox, width: 480 }}
+                value={meetingForm.subject}
+                onChange={(e) =>
+                  setMeetingForm({
+                    ...meetingForm,
+                    subject: e.target.value,
+                  })
+                }
+              />
+
+              <label>Attendees</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {meetingForm.attendees.map((attendee, index) => (
+                  <div key={index} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      style={{ ...inputBox, flex: 1 }}
+                      value={attendee.email}
+                      onChange={(e) => {
+                        const newAttendees = [...meetingForm.attendees];
+                        newAttendees[index] = { ...newAttendees[index], email: e.target.value };
+                        setMeetingForm({ ...meetingForm, attendees: newAttendees });
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Name"
+                      style={{ ...inputBox, flex: 1 }}
+                      value={attendee.name}
+                      onChange={(e) => {
+                        const newAttendees = [...meetingForm.attendees];
+                        newAttendees[index] = { ...newAttendees[index], name: e.target.value };
+                        setMeetingForm({ ...meetingForm, attendees: newAttendees });
+                      }}
+                    />
+                    {meetingForm.attendees.length > 1 && (
+                      <button
+                        type="button"
+                        style={{
+                          background: "#ef4444",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "4px",
+                          padding: "6px 10px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                        onClick={() => {
+                          const newAttendees = meetingForm.attendees.filter((_, i) => i !== index);
+                          setMeetingForm({ ...meetingForm, attendees: newAttendees });
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  style={{
+                    background: "#e5e7eb",
+                    color: "#374151",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    alignSelf: "flex-start",
+                  }}
+                  onClick={() => {
+                    setMeetingForm({
+                      ...meetingForm,
+                      attendees: [...meetingForm.attendees, { email: "", name: "" }],
+                    });
+                  }}
+                >
+                  + Add Attendee
+                </button>
+              </div>
+
+              <label>Start Date & Time*</label>
+              <input
+                type="datetime-local"
+                style={{ ...inputBox, width: 480 }}
+                value={meetingForm.startDateTime}
+                onChange={(e) =>
+                  setMeetingForm({
+                    ...meetingForm,
+                    startDateTime: e.target.value,
+                  })
+                }
+              />
+
+              <label>End Date & Time*</label>
+              <input
+                type="datetime-local"
+                style={{ ...inputBox, width: 480 }}
+                value={meetingForm.endDateTime}
+                onChange={(e) =>
+                  setMeetingForm({
+                    ...meetingForm,
+                    endDateTime: e.target.value,
+                  })
+                }
+              />
+
+              <label>Location</label>
+              <input
+                style={{ ...inputBox, width: 480 }}
+                value={meetingForm.location}
+                onChange={(e) =>
+                  setMeetingForm({
+                    ...meetingForm,
+                    location: e.target.value,
+                  })
+                }
+              />
+
+              <label>Agenda</label>
+              <textarea
+                style={{ ...inputBox, height: 80, width: 480, resize: "none" }}
+                value={meetingForm.agenda}
+                onChange={(e) =>
+                  setMeetingForm({
+                    ...meetingForm,
+                    agenda: e.target.value,
+                  })
+                }
+              />
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={meetingForm.sendEmail}
+                  onChange={(e) =>
+                    setMeetingForm({
+                      ...meetingForm,
+                      sendEmail: e.target.checked,
+                    })
+                  }
+                />
+                Send invitation via email
+              </label>
+            </div>
+
+            <div style={{ ...modalFooter, paddingLeft: 240 }}>
+              <button
+                style={cancelBtn}
+                onClick={() => {
+                  setShowAddMeeting(false);
+                  resetMeetingForm();
+                }}
+              >
+                Cancel
+              </button>
+              <button style={saveBtn} onClick={handleSaveMeeting}>
+                Schedule
               </button>
             </div>
           </div>

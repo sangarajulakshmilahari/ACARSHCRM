@@ -76,6 +76,7 @@ export default function EmployeeList({
   const [hoveredConvertMenuItem, setHoveredConvertMenuItem] = useState<
     string | null
   >(null);
+  const showActionsColumn = type !== "account";
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [analytics, setAnalytics] = useState<OutreachAnalytics>({
     totalLinkedInRequestsSent: 0,
@@ -505,7 +506,7 @@ export default function EmployeeList({
             borderCollapse:
               "collapse" as unknown as React.CSSProperties["borderCollapse"],
             borderSpacing: 0,
-            minWidth: 1040,
+            minWidth: showActionsColumn ? 1040 : 930,
             fontFamily: "inherit",
             fontSize: "inherit",
             lineHeight: 1.35,
@@ -521,7 +522,7 @@ export default function EmployeeList({
             <col style={{ width: "29%" }} />
             <col style={{ width: "8%" }} />
             <col style={{ width: "11%" }} />
-            <col style={{ width: "11%" }} />
+            {showActionsColumn && <col style={{ width: "11%" }} />}
           </colgroup>
 
           <thead>
@@ -532,7 +533,7 @@ export default function EmployeeList({
               <th style={thStyle}>Source</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}>Date of Entry</th>
-              <th style={thStyle}>Actions</th>
+              {showActionsColumn && <th style={thStyle}>Actions</th>}
             </tr>
           </thead>
 
@@ -845,197 +846,199 @@ export default function EmployeeList({
                     </div>
                   </td>
 
-                  <td
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                      ...tdStyle,
-                      textAlign: "center",
-                      verticalAlign: "middle",
-                      position: "relative",
-                    }}
-                  >
-                    {recordType.type === "lead" ? (
-                      <div
-                        data-convert-menu-root="true"
-                        style={convertMenuRootStyle}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenConvertMenuLeadId((prev) =>
-                              prev === emp.LeadId ? null : emp.LeadId
-                            );
-                          }}
-                          style={getConvertActionButtonStyle(
-                            openConvertMenuLeadId === emp.LeadId
+                  {showActionsColumn && (
+                    <td
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        ...tdStyle,
+                        textAlign: "center",
+                        verticalAlign: "middle",
+                        position: "relative",
+                      }}
+                    >
+                      {recordType.type === "lead" ? (
+                        <div
+                          data-convert-menu-root="true"
+                          style={convertMenuRootStyle}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenConvertMenuLeadId((prev) =>
+                                prev === emp.LeadId ? null : emp.LeadId
+                              );
+                            }}
+                            style={getConvertActionButtonStyle(
+                              openConvertMenuLeadId === emp.LeadId
+                            )}
+                            title="Convert"
+                          >
+                            <span>Convert</span>
+                            <span style={{ fontSize: 8 }}>v</span>
+                          </button>
+
+                          {openConvertMenuLeadId === emp.LeadId && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              style={convertMenuStyle}
+                            >
+                              <button
+                                onClick={async () => {
+                                  setOpenConvertMenuLeadId(null);
+                                  await convertLeadWithExistingFlow({
+                                    leadId: emp.LeadId,
+                                    origin: convertOrigin,
+                                    router,
+                                  });
+                                }}
+                                onMouseEnter={() =>
+                                  setHoveredConvertMenuItem(
+                                    `${String(emp.LeadId)}-prospect`
+                                  )
+                                }
+                                onMouseLeave={() =>
+                                  setHoveredConvertMenuItem(null)
+                                }
+                                style={getConvertMenuItemStyle(
+                                  hoveredConvertMenuItem ===
+                                    `${String(emp.LeadId)}-prospect`
+                                )}
+                              >
+                                <span style={convertMenuItemLabelStyle}>
+                                  Convert to Prospect
+                                </span>
+                              </button>
+
+                              <button
+                                onClick={async () => {
+                                  setOpenConvertMenuLeadId(null);
+                                  await convertLeadDirectToAccountWithExistingFlow({
+                                    leadId: emp.LeadId,
+                                    router,
+                                  });
+                                }}
+                                onMouseEnter={() =>
+                                  setHoveredConvertMenuItem(
+                                    `${String(emp.LeadId)}-account`
+                                  )
+                                }
+                                onMouseLeave={() =>
+                                  setHoveredConvertMenuItem(null)
+                                }
+                                style={getConvertMenuItemStyle(
+                                  hoveredConvertMenuItem ===
+                                    `${String(emp.LeadId)}-account`
+                                )}
+                              >
+                                <span style={convertMenuItemLabelStyle}>
+                                  Convert to Customer
+                                </span>
+                              </button>
+                            </div>
                           )}
+                        </div>
+                      ) : recordType.type === "prospect" ? (
+                        <div
+                          data-convert-menu-root="true"
+                          style={convertMenuRootStyle}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenConvertMenuLeadId((prev) =>
+                                prev === emp.LeadId ? null : emp.LeadId
+                              );
+                            }}
+                            style={getConvertActionButtonStyle(
+                              openConvertMenuLeadId === emp.LeadId
+                            )}
+                            title="Convert"
+                          >
+                            <span>Convert</span>
+                            <span style={{ fontSize: 8 }}>v</span>
+                          </button>
+
+                          {openConvertMenuLeadId === emp.LeadId && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              style={convertMenuStyle}
+                            >
+                              <button
+                                onClick={async () => {
+                                  setOpenConvertMenuLeadId(null);
+                                  await convertLeadWithExistingFlow({
+                                    leadId: emp.LeadId,
+                                    origin: convertOrigin,
+                                    router,
+                                    target: "Lead",
+                                  });
+                                }}
+                                onMouseEnter={() =>
+                                  setHoveredConvertMenuItem(
+                                    `${String(emp.LeadId)}-move-lead`
+                                  )
+                                }
+                                onMouseLeave={() =>
+                                  setHoveredConvertMenuItem(null)
+                                }
+                                style={getConvertMenuItemStyle(
+                                  hoveredConvertMenuItem ===
+                                    `${String(emp.LeadId)}-move-lead`
+                                )}
+                              >
+                                <span style={convertMenuItemLabelStyle}>
+                                  Move to Lead
+                                </span>
+                              </button>
+
+                              <button
+                                onClick={async () => {
+                                  setOpenConvertMenuLeadId(null);
+                                  await convertLeadWithExistingFlow({
+                                    leadId: emp.LeadId,
+                                    origin: convertOrigin,
+                                    router,
+                                    target: "Account",
+                                  });
+                                }}
+                                onMouseEnter={() =>
+                                  setHoveredConvertMenuItem(
+                                    `${String(emp.LeadId)}-account`
+                                  )
+                                }
+                                onMouseLeave={() =>
+                                  setHoveredConvertMenuItem(null)
+                                }
+                                style={getConvertMenuItemStyle(
+                                  hoveredConvertMenuItem ===
+                                    `${String(emp.LeadId)}-account`
+                                )}
+                              >
+                                <span style={convertMenuItemLabelStyle}>
+                                  Convert to Customer
+                                </span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await convertLeadWithExistingFlow({
+                              leadId: emp.LeadId,
+                              origin: convertOrigin,
+                              router,
+                            });
+                          }}
+                          style={getConvertActionButtonStyle(false)}
                           title="Convert"
                         >
-                          <span>Convert</span>
-                          <span style={{ fontSize: 8 }}>v</span>
+                          Convert
                         </button>
-
-                        {openConvertMenuLeadId === emp.LeadId && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            style={convertMenuStyle}
-                          >
-                            <button
-                              onClick={async () => {
-                                setOpenConvertMenuLeadId(null);
-                                await convertLeadWithExistingFlow({
-                                  leadId: emp.LeadId,
-                                  origin: convertOrigin,
-                                  router,
-                                });
-                              }}
-                              onMouseEnter={() =>
-                                setHoveredConvertMenuItem(
-                                  `${String(emp.LeadId)}-prospect`
-                                )
-                              }
-                              onMouseLeave={() =>
-                                setHoveredConvertMenuItem(null)
-                              }
-                              style={getConvertMenuItemStyle(
-                                hoveredConvertMenuItem ===
-                                  `${String(emp.LeadId)}-prospect`
-                              )}
-                            >
-                              <span style={convertMenuItemLabelStyle}>
-                                Convert to Prospect
-                              </span>
-                            </button>
-
-                            <button
-                              onClick={async () => {
-                                setOpenConvertMenuLeadId(null);
-                                await convertLeadDirectToAccountWithExistingFlow({
-                                  leadId: emp.LeadId,
-                                  router,
-                                });
-                              }}
-                              onMouseEnter={() =>
-                                setHoveredConvertMenuItem(
-                                  `${String(emp.LeadId)}-account`
-                                )
-                              }
-                              onMouseLeave={() =>
-                                setHoveredConvertMenuItem(null)
-                              }
-                              style={getConvertMenuItemStyle(
-                                hoveredConvertMenuItem ===
-                                  `${String(emp.LeadId)}-account`
-                              )}
-                            >
-                              <span style={convertMenuItemLabelStyle}>
-                                Convert to Customer
-                              </span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : recordType.type === "prospect" ? (
-                      <div
-                        data-convert-menu-root="true"
-                        style={convertMenuRootStyle}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenConvertMenuLeadId((prev) =>
-                              prev === emp.LeadId ? null : emp.LeadId
-                            );
-                          }}
-                          style={getConvertActionButtonStyle(
-                            openConvertMenuLeadId === emp.LeadId
-                          )}
-                          title="Convert"
-                        >
-                          <span>Convert</span>
-                          <span style={{ fontSize: 8 }}>v</span>
-                        </button>
-
-                        {openConvertMenuLeadId === emp.LeadId && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            style={convertMenuStyle}
-                          >
-                            <button
-                              onClick={async () => {
-                                setOpenConvertMenuLeadId(null);
-                                await convertLeadWithExistingFlow({
-                                  leadId: emp.LeadId,
-                                  origin: convertOrigin,
-                                  router,
-                                  target: "Lead",
-                                });
-                              }}
-                              onMouseEnter={() =>
-                                setHoveredConvertMenuItem(
-                                  `${String(emp.LeadId)}-move-lead`
-                                )
-                              }
-                              onMouseLeave={() =>
-                                setHoveredConvertMenuItem(null)
-                              }
-                              style={getConvertMenuItemStyle(
-                                hoveredConvertMenuItem ===
-                                  `${String(emp.LeadId)}-move-lead`
-                              )}
-                            >
-                              <span style={convertMenuItemLabelStyle}>
-                                Move to Lead
-                              </span>
-                            </button>
-
-                            <button
-                              onClick={async () => {
-                                setOpenConvertMenuLeadId(null);
-                                await convertLeadWithExistingFlow({
-                                  leadId: emp.LeadId,
-                                  origin: convertOrigin,
-                                  router,
-                                  target: "Account",
-                                });
-                              }}
-                              onMouseEnter={() =>
-                                setHoveredConvertMenuItem(
-                                  `${String(emp.LeadId)}-account`
-                                )
-                              }
-                              onMouseLeave={() =>
-                                setHoveredConvertMenuItem(null)
-                              }
-                              style={getConvertMenuItemStyle(
-                                hoveredConvertMenuItem ===
-                                  `${String(emp.LeadId)}-account`
-                              )}
-                            >
-                              <span style={convertMenuItemLabelStyle}>
-                                Convert to Customer
-                              </span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await convertLeadWithExistingFlow({
-                            leadId: emp.LeadId,
-                            origin: convertOrigin,
-                            router,
-                          });
-                        }}
-                        style={getConvertActionButtonStyle(false)}
-                        title="Convert"
-                      >
-                        Convert
-                      </button>
-                    )}
-                  </td>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

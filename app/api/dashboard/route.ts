@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "../lib/auth";
+import { buildLeadOwnerVisibilityClause } from "../lib/lead-access";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,15 +11,14 @@ export async function GET(req: NextRequest) {
     }
 
     const pool = await getPool();
-    const isAdmin = authUser.roleId === 1;
-    const scopedParams = isAdmin ? [] : [authUser.userId];
+    const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
 
     //  1 Total Leads
     const [totalRows]: any = await pool.query(`
       SELECT COUNT(LeadId) AS totalLeads
-      FROM Leads
-      ${isAdmin ? "" : "WHERE OwnerId = ?"}
-    `, scopedParams);
+      FROM Leads l
+      WHERE ${visibility.clause}
+    `, visibility.params);
 
     //  1b Funnel counts
     const [funnelRows]: any = await pool.query(
@@ -28,9 +28,9 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN l.AccountTypeId = 20 THEN 1 ELSE 0 END) AS prospects,
         SUM(CASE WHEN l.AccountTypeId = 30 THEN 1 ELSE 0 END) AS accounts
       FROM Leads l
-      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      WHERE ${visibility.clause}
       `,
-      scopedParams
+      visibility.params
     );
 
     //  Latest Activity per Lead + fallback "New" status id for leads with no activity
@@ -65,10 +65,10 @@ export async function GET(req: NextRequest) {
       LEFT JOIN LatestActivity la
         ON la.LeadId = l.LeadId
         AND la.rn = 1
-      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      WHERE ${visibility.clause}
       GROUP BY COALESCE(la.StatusId, ns.StatusId)
       ORDER BY StatusId
-    `, scopedParams);
+    `, visibility.params);
 
     //  3 Leads by Status (BAR CHART)
     const [leadsByStatus]: any = await pool.query(`
@@ -84,10 +84,10 @@ export async function GET(req: NextRequest) {
         AND la.rn = 1
       LEFT JOIN LeadStatuses ls
         ON ls.StatusId = COALESCE(la.StatusId, ns.StatusId)
-      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      WHERE ${visibility.clause}
       GROUP BY ls.StatusName, ls.SortOrder
       ORDER BY ls.SortOrder
-    `, scopedParams);
+    `, visibility.params);
 
     //  4 Leads by Owner
     const [leadsByOwner]: any = await pool.query(`
@@ -97,10 +97,10 @@ export async function GET(req: NextRequest) {
       FROM Leads l
       INNER JOIN Users u
         ON l.OwnerId = u.UserId
-      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      WHERE ${visibility.clause}
       GROUP BY u.UserName
       ORDER BY count DESC
-    `, scopedParams);
+    `, visibility.params);
 
     //  5 Monthly Trends by Owner
     const [monthlyTrends]: any = await pool.query(`
@@ -113,11 +113,9 @@ export async function GET(req: NextRequest) {
       FROM Leads l
       INNER JOIN Users u
         ON l.OwnerId = u.UserId
-      ${
-        isAdmin
-          ? "WHERE COALESCE(l.LeadDate, l.CreatedOn) >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 12 MONTH) AND COALESCE(l.LeadDate, l.CreatedOn) < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH)"
-          : "WHERE l.OwnerId = ? AND COALESCE(l.LeadDate, l.CreatedOn) >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 12 MONTH) AND COALESCE(l.LeadDate, l.CreatedOn) < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH)"
-      }
+      WHERE ${visibility.clause}
+        AND COALESCE(l.LeadDate, l.CreatedOn) >= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 12 MONTH)
+        AND COALESCE(l.LeadDate, l.CreatedOn) < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH)
       GROUP BY
         DATE_FORMAT(COALESCE(l.LeadDate, l.CreatedOn), '%b %Y'),
         YEAR(COALESCE(l.LeadDate, l.CreatedOn)),
@@ -126,7 +124,7 @@ export async function GET(req: NextRequest) {
       ORDER BY
         YearNum,
         MonthNum
-    `, scopedParams);
+    `, visibility.params);
 
     // 6 Outreach Analytics
     const [outreachRows]: any = await pool.query(
@@ -138,9 +136,9 @@ export async function GET(req: NextRequest) {
       FROM LeadContacts lc
       INNER JOIN Leads l
         ON l.LeadId = lc.LeadId
-      ${isAdmin ? "" : "WHERE l.OwnerId = ?"}
+      WHERE ${visibility.clause}
       `,
-      scopedParams
+      visibility.params
     );
 
     const totalLinkedInRequestsSent = Number(

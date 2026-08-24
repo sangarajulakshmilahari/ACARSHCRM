@@ -126,6 +126,26 @@ export default function AddLeadPage({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!form.CompanyName.trim()) {
+      alert("Please enter Company Name");
+      return;
+    }
+
+    if (!form.CompanyLocation.trim()) {
+      alert("Please enter Company Location");
+      return;
+    }
+
+    if (!form.ContactTitle.trim()) {
+      alert("Please enter Contact Title");
+      return;
+    }
+
+    if (!form.ContactPhone.trim()) {
+      alert("Please enter Contact Phone");
+      return;
+    }
+
     if (!form.ContactRoleName) {
       alert("Please select Contact Role");
       return;
@@ -269,7 +289,9 @@ const customSelectStyles = {
               </div>
 
               <div>
-                <label style={labelStyle}>Company Location</label>
+                <label style={labelStyle}>
+                  Company Location <span style={{ color: "#ef4444" }}>*</span>
+                </label>
                 <input
                   type="text"
                   name="CompanyLocation"
@@ -277,6 +299,7 @@ const customSelectStyles = {
                   style={inputStyle}
                   value={form.CompanyLocation}
                   onChange={handleChange}
+                  required
                 />
               </div>
 
@@ -454,7 +477,9 @@ const customSelectStyles = {
               </div>
 
               <div>
-                <label style={labelStyle}>Contact Title</label>
+                <label style={labelStyle}>
+                  Contact Title <span style={{ color: "#ef4444" }}>*</span>
+                </label>
                 <input
                   type="text"
                   name="ContactTitle"
@@ -462,6 +487,7 @@ const customSelectStyles = {
                   style={inputStyle}
                   value={form.ContactTitle}
                   onChange={handleChange}
+                  required
                 />
               </div>
 
@@ -501,7 +527,9 @@ const customSelectStyles = {
               </div>
 
               <div>
-                <label style={labelStyle}>Phone</label>
+                <label style={labelStyle}>
+                  Phone <span style={{ color: "#ef4444" }}>*</span>
+                </label>
                 <input
                   type="text"
                   name="ContactPhone"
@@ -509,6 +537,7 @@ const customSelectStyles = {
                   style={inputStyle}
                   value={form.ContactPhone}
                   onChange={handleChange}
+                  required
                 />
               </div>
 
@@ -551,72 +580,7 @@ const customSelectStyles = {
         </section>
 
         {/* ---------------------------- QUICK ACTIONS ---------------------------- */}
-        <section style={boxWrapper}>
-          <div style={boxHeader}>Quick Actions</div>
-
-          <div style={{ padding: 20 }}>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 14,
-                fontWeight: 500,
-              }}
-            >
-              <input
-                type="checkbox"
-                name="AddReminder"
-                checked={form.AddReminder}
-                onChange={handleChange}
-              />
-              Add Reminder
-            </label>
-
-            {/* 🔔 Scheduler UI */}
-            {form.AddReminder && (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 16,
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 20,
-                  }}
-                >
-                  <div>
-                    <label style={labelStyle}>Reminder Date & Time</label>
-                    <input
-                      type="datetime-local"
-                      name="ReminderDateTime"
-                      value={form.ReminderDateTime}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={labelStyle}>Reminder Note</label>
-                    <input
-                      type="text"
-                      name="ReminderNote"
-                      placeholder="Follow up on proposal"
-                      value={form.ReminderNote}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+        
 
         {/* ---------------------------- BUTTONS ---------------------------- */}
         <div

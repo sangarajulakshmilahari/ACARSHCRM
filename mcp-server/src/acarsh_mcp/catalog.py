@@ -590,10 +590,29 @@ LOOKUPS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# Entity aliases mapping common terms to actual entity names
+ENTITY_ALIASES = {
+    "prospects": "leads",
+    "prospect": "leads",
+    "accounts": "leads",
+    "account": "leads",
+    "master_accounts": "leads",
+    "master_account": "leads",
+}
+
+
 def get_entity(name: str) -> EntitySpec:
     key = name.strip().lower()
+    
+    # Check aliases first
+    if key in ENTITY_ALIASES:
+        key = ENTITY_ALIASES[key]
+    
     try:
-        return ENTITIES[key]
+        entity = ENTITIES[key]
+        # If the alias is "prospects", we should add an automatic filter
+        # but that's handled at the query level, not here
+        return entity
     except KeyError as exc:
         raise ValidationError(
             f"Unknown entity '{name}'.",

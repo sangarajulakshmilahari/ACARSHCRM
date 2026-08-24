@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "../../../../config/db";
 import { getAuthUser } from "../../lib/auth";
+import { buildLeadOwnerVisibilityClause } from "@/app/api/lib/lead-access";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
     }
 
     const pool = await getPool();
-    const isAdmin = authUser.roleId === 1;
+    const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
     const entityType = req.nextUrl.searchParams.get("type") ?? "";
 
     const whereClauses: string[] = [];
@@ -24,10 +25,8 @@ export async function GET(req: NextRequest) {
       whereClauses.push("at.Name = 'Account'");
     }
 
-    if (!isAdmin) {
-      whereClauses.push("l.OwnerId = ?");
-      params.push(authUser.userId);
-    }
+    whereClauses.push(visibility.clause);
+    params.push(...visibility.params);
 
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 

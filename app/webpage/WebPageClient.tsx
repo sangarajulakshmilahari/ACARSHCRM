@@ -8,7 +8,6 @@ import React, { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../../store/store";
 import { clearUser } from "../../store/userSlice";
-import { setEmployees } from "../../store/employeesSlice";
 import EmployeeList, { Employee } from "./components/EmployeeList";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -62,17 +61,6 @@ async function fetchEmployeeList(endpoint: string): Promise<Employee[]> {
     const res = await fetch(endpoint);
     if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
     return res.json();
-}
-
-function mergeEmployeeLists(...lists: Employee[][]): Employee[] {
-    const merged = new Map<number | string, Employee>();
-
-    lists.flat().forEach((employee) => {
-        if (employee?.LeadId == null) return;
-        merged.set(employee.LeadId, employee);
-    });
-
-    return Array.from(merged.values());
 }
 
 function getTabLabel(tab: TabKey): string {
@@ -193,12 +181,7 @@ export default function WebPageClient(): JSX.Element {
             setError(null);
             setLoading(true);
 
-            const [leads, prospects, accounts] = await Promise.all([
-                fetchEmployeeList("/api/employees/leads"),
-                fetchEmployeeList("/api/employees/prospects"),
-                fetchEmployeeList("/api/employees/account"),
-            ]);
-            const data = mergeEmployeeLists(leads, prospects, accounts);
+            const data = await fetchEmployeeList("/api/employees/leads");
             // dispatch(setEmployees(data));
             setEmployeesLocal(data);
         } catch (err: any) {
@@ -215,11 +198,7 @@ export default function WebPageClient(): JSX.Element {
             setError(null);
             setLoading(true);
 
-            const [prospects, accounts] = await Promise.all([
-                fetchEmployeeList("/api/employees/prospects"),
-                fetchEmployeeList("/api/employees/account"),
-            ]);
-            const data = mergeEmployeeLists(prospects, accounts);
+            const data = await fetchEmployeeList("/api/employees/prospects");
             // dispatch(setEmployees(data));
             setEmployeesLocal(data);
         } catch (err: any) {

@@ -1,4 +1,11 @@
 {
-  "/api/employees/reminders/dispatch/route": "app/api/employees/reminders/dispatch/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/page": "app/page.js",
+  "/api/dashboard/route": "app/api/dashboard/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/auth/logout/route": "app/api/auth/logout/route.js",
+  "/api/employees/leads/route": "app/api/employees/leads/route.js",
+  "/api/employees/outreach-analytics/route": "app/api/employees/outreach-analytics/route.js",
+  "/api/auth/callback/route": "app/api/auth/callback/route.js",
   "/webpage/page": "app/webpage/page.js"
 }

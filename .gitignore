@@ -9,3 +9,5 @@ node_modules
 config/db.ts
 
 /app/generated/prisma
+
+database/migrations

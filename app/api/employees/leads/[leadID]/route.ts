@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
 
 
 //  GET LEAD DETAILS
@@ -9,6 +11,11 @@ export async function GET(
   { params }: { params: { leadID: string } }
 ) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const leadId = Number(params.leadID);
     if (isNaN(leadId)) {
       return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
@@ -18,6 +25,11 @@ export async function GET(
     const conn = await pool.getConnection();
 
     try {
+      const canViewLead = await canUserViewLeadById(conn, authUser, leadId);
+      if (!canViewLead) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
       /* 1. Lead Basic Details */
       const [leadRows]: any = await conn.query(
         `

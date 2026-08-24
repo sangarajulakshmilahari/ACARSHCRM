@@ -6,6 +6,19 @@ type ReminderEmailPayload = {
   reminderDateTime: Date;
 };
 
+type MeetingInviteEmailPayload = {
+  to: string;
+  subject: string;
+  startDateTime: Date;
+  endDateTime: Date;
+  meetingLink?: string | null;
+  agenda?: string;
+  location?: string;
+  timeZone?: string;
+  organizerName?: string;
+  leadCompanyName?: string;
+};
+
 function getSmtpConfig() {
   const host = (process.env.SMTP_HOST || "").trim();
   const port = Number(process.env.SMTP_PORT || 587);
@@ -25,6 +38,14 @@ function formatReminderTime(date: Date) {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "Asia/Kolkata",
+  }).format(date);
+}
+
+function formatMeetingTime(date: Date, timeZone = "Asia/Kolkata") {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
   }).format(date);
 }
 
@@ -60,6 +81,55 @@ export async function sendReminderNotificationEmail(payload: ReminderEmailPayloa
     from: smtp.from,
     to: payload.to,
     subject: "Reminder Notification",
+    text,
+  });
+
+  return { success: true };
+}
+
+export async function sendMeetingInviteEmail(payload: MeetingInviteEmailPayload) {
+  const smtp = getSmtpConfig();
+
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: false,
+    auth: {
+      user: smtp.user,
+      pass: smtp.pass,
+    },
+  });
+
+  const tz = payload.timeZone || "Asia/Kolkata";
+  const startTime = formatMeetingTime(payload.startDateTime, tz);
+  const endTime = formatMeetingTime(payload.endDateTime, tz);
+
+  const text = [
+    "Hello,",
+    "",
+    "You have a new meeting invitation.",
+    "",
+    `${payload.subject}`,
+    `Start: ${startTime}`,
+    `End: ${endTime}`,
+    `Time Zone: ${tz}`,
+    `Company: ${payload.leadCompanyName || "-"}`,
+    `Location: ${payload.location || "Online"}`,
+    `Meeting Link: ${payload.meetingLink || "Will be shared shortly"}`,
+    "",
+    "Agenda:",
+    payload.agenda?.trim() || "-",
+    "",
+    `Organizer: ${payload.organizerName || "Acarsh Team"}`,
+    "",
+    "Thanks & Regards",
+    "Acarsh Support.",
+  ].join("\n");
+
+  await transporter.sendMail({
+    from: smtp.from,
+    to: payload.to,
+    subject: `Meeting Invite: ${payload.subject}`,
     text,
   });
 
