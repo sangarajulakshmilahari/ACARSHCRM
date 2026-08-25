@@ -4076,7 +4076,7 @@ export default function LeadDetailsClient({
                         <div style={{ color: "#64748b", fontSize: 13 }}>No Statement of Work uploaded.</div>
                         <button
                           type="button"
-                          onClick={() => triggerSowUpload(false)}
+                          onClick={() => triggerSowUpload()}
                           disabled={projectSowUploadLoading}
                           style={{
                             marginTop: 8,
