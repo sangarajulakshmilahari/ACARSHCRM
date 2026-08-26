@@ -13,6 +13,7 @@ type Contact = {
   LeadContactID?: number;
   ContactName?: string;
   ContactEmail?: string;
+  ContactPhone?: string;
   ContactTitle?: string;
   ContactRoleName?: string;
   LinkedInProfile?: string;
@@ -3114,6 +3115,22 @@ export default function LeadDetailsClient({
                             />
                             Email Sent
                           </label>
+                        </div>
+                      )}
+
+                      {c.ContactPhone && (
+                        <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 10 }}>
+                          <div style={contactRowLabel}>Phone:</div>
+                          <div style={{ fontSize: 13, color: "#F26522", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <a
+                              href={`tel:${c.ContactPhone}`}
+                              title={c.ContactPhone}
+                              style={{ color: "inherit", textDecoration: "none" }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {c.ContactPhone}
+                            </a>
+                          </div>
                         </div>
                       )}
 

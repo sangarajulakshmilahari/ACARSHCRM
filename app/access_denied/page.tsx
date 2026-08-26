@@ -140,7 +140,7 @@ export default function AccessDenied() {
               {/* Primary Button */}
               <a
                 href="/dashboard"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 col-span-1 sm:col-span-2 lg:col-span-1"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#F26522] text-white font-medium rounded-lg hover:bg-[#E45816] transition-colors active:bg-[#D94F11] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 col-span-1 sm:col-span-2 lg:col-span-1"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -164,7 +164,7 @@ export default function AccessDenied() {
             {/* Tertiary Link - Contact Admin */}
             <a
               href={`mailto:${supportEmail}`}
-              className="inline-flex items-center justify-center gap-2 w-full px-6 py-3 text-blue-600 font-medium rounded-lg hover:bg-blue-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="inline-flex items-center justify-center gap-2 w-full px-6 py-3 text-[#F26522] font-medium rounded-lg hover:bg-orange-50 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />

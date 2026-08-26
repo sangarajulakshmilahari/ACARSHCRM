@@ -32,6 +32,7 @@ export type Employee = {
   AccountTypeId?: number | string | null;
   AccountTypeName?: string | null;
   Name?: string | null;
+  RecordType?: string | null;
   Contacts: Contact[];
 };
 
@@ -44,6 +45,12 @@ type Props = {
   error?: string | null;
   onAddLead: () => void;
   onAddLead2?: () => void;
+  addButtonLabelOverride?: string;
+  secondaryAddButtonLabelOverride?: string;
+  showAnalyticsCards?: boolean;
+  showToolbar?: boolean;
+  fillHeight?: boolean;
+  tableMaxHeight?: number | string;
   onOpenLeadDetails?: (
     leadId: number | string,
     origin?: DetailsOrigin
@@ -64,6 +71,12 @@ export default function EmployeeList({
   error,
   onAddLead,
   onAddLead2,
+  addButtonLabelOverride,
+  secondaryAddButtonLabelOverride,
+  showAnalyticsCards = true,
+  showToolbar = true,
+  fillHeight = true,
+  tableMaxHeight,
   onOpenLeadDetails,
   type,
 }: Props) {
@@ -153,6 +166,7 @@ export default function EmployeeList({
   }, []);
 
   const addButtonLabel = useMemo(() => {
+    if (addButtonLabelOverride) return addButtonLabelOverride;
     switch (type) {
       case "prospect":
         return "Add Prospect";
@@ -162,7 +176,7 @@ export default function EmployeeList({
       default:
         return "Add Lead";
     }
-  }, [type]);
+  }, [addButtonLabelOverride, type]);
 
   const employeesList: Employee[] = Array.isArray(employees)
     ? employees
@@ -301,121 +315,106 @@ export default function EmployeeList({
         boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
         border: "1px solid #e9eef7",
         overflow: "hidden",
-        height: "100%",
-        minHeight: 0,
+        height: fillHeight ? "100%" : "auto",
+        minHeight: fillHeight ? 0 : undefined,
         display: "flex",
         flexDirection: "column",
         ...baseFontStyles,
       }}
     >
-      <div
-        style={{
-          padding: "14px 18px 10px",
-          background: "#ffffff",
-          borderBottom: "1px solid #e9eef7",
-          flexShrink: 0,
-        }}
-      >
+      {showAnalyticsCards && (
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 10,
+            padding: "14px 18px 10px",
+            background: "#ffffff",
+            borderBottom: "1px solid #e9eef7",
+            flexShrink: 0,
           }}
         >
-          {outreachKpis.map((kpi) => (
-            <div
-              key={kpi.key}
-              title={kpi.tooltip}
-              style={{
-                border: "1px solid #e7ecf4",
-                borderRadius: 10,
-                padding: "9px 10px",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                minHeight: 58,
-                background: "linear-gradient(180deg, #ffffff 0%, #f9fbff 100%)",
-              }}
-            >
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  background: kpi.iconBg,
-                  color: kpi.iconColor,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                {kpi.icon}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    lineHeight: 1.2,
-                    color: "#64748b",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {kpi.label}
-                </div>
-                <div
-                  style={{
-                    marginTop: 3,
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: "#0f172a",
-                    letterSpacing: "0.2px",
-                  }}
-                >
-                  {analyticsLoading ? "..." : kpi.value}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 12,
-          padding: "16px",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            onClick={onAddLead}
+          <div
             style={{
-              background: "#3a77e3",
-              color: "white",
-              padding: "7px 12px",
-              border: "none",
-              borderRadius: 6,
-              fontSize: "10.05px",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontFamily: "inherit",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 10,
             }}
           >
-            {addButtonLabel}
-          </button>
+            {outreachKpis.map((kpi) => (
+              <div
+                key={kpi.key}
+                title={kpi.tooltip}
+                style={{
+                  border: "1px solid #e7ecf4",
+                  borderRadius: 10,
+                  padding: "9px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  minHeight: 58,
+                  background: "linear-gradient(180deg, #ffffff 0%, #f9fbff 100%)",
+                }}
+              >
+                <span
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: kpi.iconBg,
+                    color: kpi.iconColor,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {kpi.icon}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      lineHeight: 1.2,
+                      color: "#64748b",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {kpi.label}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 3,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: "#0f172a",
+                      letterSpacing: "0.2px",
+                    }}
+                  >
+                    {analyticsLoading ? "..." : kpi.value}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-          {type === "account" && onAddLead2 && (
+      {showToolbar && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+            padding: "16px",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", gap: "10px" }}>
             <button
-              onClick={() => onAddLead2()}
+              onClick={onAddLead}
               style={{
-                background: "#3a77e3",
+                background: "#F26522",
                 color: "white",
                 padding: "7px 12px",
                 border: "none",
@@ -426,62 +425,82 @@ export default function EmployeeList({
                 fontFamily: "inherit",
               }}
             >
-              Add Lead
+              {addButtonLabel}
             </button>
-          )}
-        </div>
 
-        <div style={{ position: "relative", display: "inline-block" }}>
-          <Image
-            src="/search.png"
-            alt="search"
-            width={18}
-            height={18}
-            style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-              pointerEvents: "none",
-            }}
-          />
+            {type === "account" && onAddLead2 && (
+              <button
+                onClick={() => onAddLead2()}
+                style={{
+                  background: "#F26522",
+                  color: "white",
+                  padding: "7px 12px",
+                  border: "none",
+                  borderRadius: 6,
+                  fontSize: "10.05px",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  fontFamily: "inherit",
+                }}
+              >
+                {secondaryAddButtonLabelOverride || "Add Lead"}
+              </button>
+            )}
+          </div>
 
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            placeholder={searchPlaceholder}
-            style={{
-              width: "350px",
-              marginRight: "300px",
-              padding: "12px 40px",
-              paddingLeft: "45px",
-              borderRadius: 10,
-              border: isSearchFocused
-                ? "1.5px solid #4a90e2"
-                : "1px solid #d8e1ef",
-              boxShadow: isSearchFocused
-                ? "0 0 8px rgba(8, 40, 218, 0.12)"
-                : "none",
-              fontSize: "10.05px",
-              outline: "none",
-              transition: "box-shadow 0.15s ease, border 0.15s ease",
-              fontFamily: "inherit",
-              lineHeight: 1.35,
-              WebkitFontSmoothing: "antialiased",
-            }}
-          />
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <Image
+              src="/search.png"
+              alt="search"
+              width={18}
+              height={18}
+              style={{
+                position: "absolute",
+                left: 12,
+                top: "50%",
+                transform: "translateY(-50%)",
+                pointerEvents: "none",
+              }}
+            />
+
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              placeholder={searchPlaceholder}
+              style={{
+                width: "350px",
+                marginRight: "300px",
+                padding: "12px 40px",
+                paddingLeft: "45px",
+                borderRadius: 10,
+                border: isSearchFocused
+                  ? "1.5px solid #4a90e2"
+                  : "1px solid #d8e1ef",
+                boxShadow: isSearchFocused
+                  ? "0 0 8px rgba(8, 40, 218, 0.12)"
+                  : "none",
+                fontSize: "10.05px",
+                outline: "none",
+                transition: "box-shadow 0.15s ease, border 0.15s ease",
+                fontFamily: "inherit",
+                lineHeight: 1.35,
+                WebkitFontSmoothing: "antialiased",
+              }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div
         style={{
-          flex: 1,
-          minHeight: 0,
+          flex: fillHeight ? 1 : undefined,
+          minHeight: fillHeight ? 0 : undefined,
           overflowY: "auto",
           overflowX: "auto",
+          maxHeight: !fillHeight && tableMaxHeight ? tableMaxHeight : undefined,
           borderTop: "1px solid #edf2fa",
         }}
       >
@@ -538,7 +557,7 @@ export default function EmployeeList({
               return (
                 <tr
                   key={emp.LeadId}
-                  onDoubleClick={() =>
+                  onClick={() =>
                     onOpenLeadDetails?.(emp.LeadId, convertOrigin)
                   }
                   style={{
@@ -622,7 +641,7 @@ export default function EmployeeList({
                             }}
                           >
                             <div
-                              title="Double click to open details"
+                              title="Click to open details"
                               style={{
                                 fontWeight: 700,
                                 color: "#212529",
@@ -749,7 +768,7 @@ export default function EmployeeList({
                               fontWeight: 600,
                               cursor: "pointer",
                             }}
-                            title="Double-click the row to view all contacts"
+                            title="Click the row to view all contacts"
                           >
                             +{emp.Contacts.length - 2} more
                           </div>
@@ -831,7 +850,7 @@ export default function EmployeeList({
                   </td>
 
                   <td
-                    onDoubleClick={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                     style={{
                       ...tdStyle,
                       textAlign: "center",
@@ -1122,9 +1141,9 @@ const convertActionButtonStyle: React.CSSProperties = {
   minWidth: 0,
   padding: "6px 10px",
   borderRadius: 8,
-  border: "1px solid #c7dafd",
-  background: "#f7faff",
-  color: "#2459d3",
+  border: "1px solid #F26522",
+  background: "#ffffff",
+  color: "#F26522",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: "11px",
@@ -1143,9 +1162,9 @@ const convertActionButtonStyle: React.CSSProperties = {
 function getConvertActionButtonStyle(isOpen: boolean): React.CSSProperties {
   return {
     ...convertActionButtonStyle,
-    background: isOpen ? "#2459d3" : "#f7faff",
-    color: isOpen ? "#ffffff" : "#2459d3",
-    borderColor: isOpen ? "#2459d3" : "#c7dafd",
+    background: "#ffffff",
+    color: "#F26522",
+    borderColor: "#F26522",
     boxShadow: isOpen
       ? "0 8px 18px rgba(37, 89, 211, 0.2)"
       : "0 1px 2px rgba(37, 89, 211, 0.08)",

@@ -29,6 +29,7 @@ type TabKey =
     | "addLead"
     | "addProspect"
     | "addAccount"
+    | "addAccountLead"
     | "Prospect"
     | "leadDetails"
     | "Account"
@@ -66,6 +67,12 @@ async function fetchEmployeeList(endpoint: string): Promise<Employee[]> {
 function getTabLabel(tab: TabKey): string {
     if (tab === "Account") return "Customer";
     return tab[0].toUpperCase() + tab.slice(1);
+}
+
+function normalizeCustomerRecordType(value: string | null | undefined): "CUSTOMER" | "CUSTOMER_LEAD" {
+    return String(value ?? "CUSTOMER").trim().toUpperCase() === "CUSTOMER_LEAD"
+        ? "CUSTOMER_LEAD"
+        : "CUSTOMER";
 }
 
 export default function WebPageClient(): JSX.Element {
@@ -171,6 +178,7 @@ export default function WebPageClient(): JSX.Element {
         leadDetails: "",
         addProspect: "",
         addAccount: "",
+        addAccountLead: "",
         editLead: "",
     };
 
@@ -256,7 +264,7 @@ export default function WebPageClient(): JSX.Element {
                 ? "leads"
                 : activeTab === "addProspect"
                     ? "Prospect"
-                    : activeTab === "addAccount"
+                    : activeTab === "addAccount" || activeTab === "addAccountLead"
                         ? "Account"
                         : activeTab;
 
@@ -308,20 +316,63 @@ export default function WebPageClient(): JSX.Element {
                 );
 
             case "Account":
+                const accountRowsSource = employeesLocal ?? employeesFromStore;
+                const accountRows: Employee[] = Array.isArray(accountRowsSource)
+                    ? accountRowsSource
+                    : accountRowsSource &&
+                        Array.isArray((accountRowsSource as any).data)
+                        ? ((accountRowsSource as any).data as Employee[])
+                        : [];
+                const customerRows = accountRows.filter(
+                    (emp) => normalizeCustomerRecordType(emp.RecordType) === "CUSTOMER"
+                );
+                const customerLeadRows = accountRows.filter(
+                    (emp) => normalizeCustomerRecordType(emp.RecordType) === "CUSTOMER_LEAD"
+                );
+
                 return (
-                    <EmployeeList
-                        type="account"
-                        employees={employeesLocal ?? employeesFromStore}
-                        loading={loading}
-                        error={error}
-                        onAddLead={() => setActiveTab("addAccount")}
-                        onAddLead2={() => setActiveTab("addAccount")}
-                        onOpenLeadDetails={(leadId, origin) => {
-                            setSelectedLeadId(leadId);
-                            setSelectedLeadOrigin(origin ?? "Account");
-                            setActiveTab("leadDetails");
-                        }}
-                    />
+                    <div style={{ display: "grid", gap: 16, height: "100%", minHeight: 0 }}>
+                        <EmployeeList
+                            type="account"
+                            employees={customerRows}
+                            loading={loading}
+                            error={error}
+                            onAddLead={() => setActiveTab("addAccount")}
+                            onAddLead2={() => setActiveTab("addAccountLead")}
+                            addButtonLabelOverride="Add Customer"
+                            secondaryAddButtonLabelOverride="Add Customer Lead"
+                            showAnalyticsCards
+                            showToolbar
+                            fillHeight={false}
+                            tableMaxHeight={380}
+                            onOpenLeadDetails={(leadId, origin) => {
+                                setSelectedLeadId(leadId);
+                                setSelectedLeadOrigin(origin ?? "Account");
+                                setActiveTab("leadDetails");
+                            }}
+                        />
+
+                        <div style={{ color: "#0F1F3D", fontWeight: 700, fontSize: 15, marginTop: -4 }}>
+                            Customer Lead Table
+                        </div>
+
+                        <EmployeeList
+                            type="account"
+                            employees={customerLeadRows}
+                            loading={loading}
+                            error={error}
+                            onAddLead={() => setActiveTab("addAccountLead")}
+                            showAnalyticsCards={false}
+                            showToolbar={false}
+                            fillHeight={false}
+                            tableMaxHeight={320}
+                            onOpenLeadDetails={(leadId, origin) => {
+                                setSelectedLeadId(leadId);
+                                setSelectedLeadOrigin(origin ?? "Account");
+                                setActiveTab("leadDetails");
+                            }}
+                        />
+                    </div>
                 );
 
             case "addLead":
@@ -334,7 +385,22 @@ export default function WebPageClient(): JSX.Element {
 
             case "addAccount":
                 return (
-                    <AddLeadClient type="account" onBack={() => handleTab("Account")} />
+                    <AddLeadClient
+                        type="account"
+                        accountRecordType="CUSTOMER"
+                        entityLabelOverride="Customer"
+                        onBack={() => handleTab("Account")}
+                    />
+                );
+
+            case "addAccountLead":
+                return (
+                    <AddLeadClient
+                        type="account"
+                        accountRecordType="CUSTOMER_LEAD"
+                        entityLabelOverride="Customer Lead"
+                        onBack={() => handleTab("Account")}
+                    />
                 );
 
             case "leadDetails":

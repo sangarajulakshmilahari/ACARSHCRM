@@ -23,11 +23,15 @@ type ApolloPhoneStatus = "found" | "unavailable" | "timeout" | "not_requested";
 type AddLeadPageProps = {
   onBack?: () => void;
   type?: EntityType;
+  accountRecordType?: "CUSTOMER" | "CUSTOMER_LEAD";
+  entityLabelOverride?: string;
 };
 
 export default function AddLeadPage({
   onBack,
   type = "lead",
+  accountRecordType = "CUSTOMER",
+  entityLabelOverride,
 }: AddLeadPageProps) {
   const [companies, setCompanies] = useState<any[]>([]);
   const [leadSources, setLeadSources] = useState<any[]>([]);
@@ -43,7 +47,8 @@ export default function AddLeadPage({
 
   // 🔹 Texts based on type
   const entityLabel: string =
-    type === "prospect" ? "Prospect" : type === "account" ? "Customer" : "Lead";
+    entityLabelOverride ??
+    (type === "prospect" ? "Prospect" : type === "account" ? "Customer" : "Lead");
 
   const entityLabelLower = entityLabel.toLowerCase();
 
@@ -62,7 +67,7 @@ export default function AddLeadPage({
   };
 
   const getRecordTypeForType = (value: EntityType) => {
-    if (value === "account") return "CUSTOMER_LEAD";
+    if (value === "account") return accountRecordType;
     return null;
   };
 
@@ -309,11 +314,6 @@ export default function AddLeadPage({
 
     if (!form.ContactTitle.trim()) {
       alert("Please enter Contact Title");
-      return;
-    }
-
-    if (!form.ContactPhone.trim()) {
-      alert("Please enter Contact Phone");
       return;
     }
 
@@ -745,7 +745,7 @@ const customSelectStyles = {
 
               <div>
                 <label style={labelStyle}>
-                  Email <span style={{ color: "#ef4444" }}>*</span>
+                  Email
                 </label>
                 <input
                   type="email"
@@ -759,7 +759,7 @@ const customSelectStyles = {
 
               <div>
                 <label style={labelStyle}>
-                  Phone <span style={{ color: "#ef4444" }}>*</span>
+                  Phone
                 </label>
                 <input
                   type="text"
@@ -768,7 +768,6 @@ const customSelectStyles = {
                   style={inputStyle}
                   value={form.ContactPhone}
                   onChange={handleChange}
-                  required
                 />
               </div>
 
