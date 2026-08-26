@@ -32,6 +32,7 @@ export type Employee = {
   AccountTypeId?: number | string | null;
   AccountTypeName?: string | null;
   Name?: string | null;
+  RecordType?: string | null;
   Contacts: Contact[];
 };
 
@@ -226,6 +227,40 @@ export default function EmployeeList({
       return String(b.LeadId).localeCompare(String(a.LeadId));
     });
   }, [employeesList, query, type]);
+
+  const tableSections = useMemo(() => {
+    if (type !== "account") {
+      return [
+        {
+          key: "default",
+          title: null as string | null,
+          subtitle: null as string | null,
+          rows: filteredEmployees,
+        },
+      ];
+    }
+
+    const customerLeads = filteredEmployees.filter(
+      (emp) => String(emp.RecordType || "").trim().toUpperCase() === "CUSTOMER_LEAD",
+    );
+    const customers = filteredEmployees.filter((emp) => {
+      const value = String(emp.RecordType || "").trim().toUpperCase();
+      return value === "CUSTOMER" || value === "";
+    });
+
+    return [
+      {
+        key: "customers",
+        title: "Customers",
+        rows: customers,
+      },
+      {
+        key: "customer-leads",
+        title: "Customer Leads",
+        rows: customerLeads,
+      },
+    ];
+  }, [type, filteredEmployees]);
 
   const outreachKpis = useMemo(
     () => [
@@ -440,7 +475,7 @@ export default function EmployeeList({
                 fontFamily: "inherit",
               }}
             >
-              Add Lead
+              Add Customer Lead
             </button>
           )}
         </div>
@@ -497,48 +532,66 @@ export default function EmployeeList({
           overflowY: "auto",
           overflowX: "auto",
           borderTop: "1px solid rgba(31, 58, 104, 0.12)",
+          display: "grid",
+          gap: type === "account" ? 16 : 0,
+          padding: type === "account" ? 12 : 0,
         }}
       >
-        <table
-          style={{
-            width: "100%",
-            tableLayout: "fixed",
-            borderCollapse:
-              "collapse" as unknown as React.CSSProperties["borderCollapse"],
-            borderSpacing: 0,
-            minWidth: showActionsColumn ? 1040 : 930,
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            lineHeight: 1.35,
-            letterSpacing: "0.2px",
-            borderStyle: "solid",
-            borderWidth: 0,
-          }}
-        >
-          <colgroup>
-            <col style={{ width: "13%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "29%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "11%" }} />
-            {showActionsColumn && <col style={{ width: "11%" }} />}
-          </colgroup>
+        {tableSections.map((section) => (
+          <div key={section.key} style={{ border: type === "account" ? "1px solid rgba(31, 58, 104, 0.12)" : "none", borderRadius: type === "account" ? 10 : 0, overflow: "hidden", background: "#fff" }}>
+            {section.title && (
+              <div style={{ padding: "10px 12px", borderBottom: "1px solid rgba(31, 58, 104, 0.12)", background: "#fff" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#1F3A68" }}>{section.title}</div>
+              </div>
+            )}
 
-          <thead>
-            <tr>
-              <th style={thStyle}>Owner</th>
-              <th style={thStyle}>Company</th>
-              <th style={thStyle}>Contacts</th>
-              <th style={thStyle}>Source</th>
-              <th style={thStyle}>Status</th>
-              <th style={thStyle}>Date of Entry</th>
-              {showActionsColumn && <th style={thStyle}>Actions</th>}
-            </tr>
-          </thead>
+            <div
+              style={{
+                overflowX: "auto",
+                overflowY: type === "account" ? "auto" : "visible",
+                maxHeight: type === "account" ? 320 : undefined,
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  tableLayout: "fixed",
+                  borderCollapse:
+                    "collapse" as unknown as React.CSSProperties["borderCollapse"],
+                  borderSpacing: 0,
+                  minWidth: showActionsColumn ? 1040 : 930,
+                  fontFamily: "inherit",
+                  fontSize: "inherit",
+                  lineHeight: 1.35,
+                  letterSpacing: "0.2px",
+                  borderStyle: "solid",
+                  borderWidth: 0,
+                }}
+              >
+                <colgroup>
+                  <col style={{ width: "13%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "29%" }} />
+                  <col style={{ width: "8%" }} />
+                  <col style={{ width: "11%" }} />
+                  {showActionsColumn && <col style={{ width: "11%" }} />}
+                </colgroup>
 
-          <tbody>
-            {filteredEmployees.map((emp, idx) => {
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Owner</th>
+                    <th style={thStyle}>Company</th>
+                    <th style={thStyle}>Contacts</th>
+                    <th style={thStyle}>Source</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Date of Entry</th>
+                    {showActionsColumn && <th style={thStyle}>Actions</th>}
+                  </tr>
+                </thead>
+
+                <tbody>
+            {section.rows.map((emp, idx) => {
               const rowStyle: React.CSSProperties = {
                 ...trStyle,
                 backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fbf8f4",
@@ -1042,8 +1095,11 @@ export default function EmployeeList({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1226,3 +1282,18 @@ function getConvertMenuItemStyle(isHovered: boolean): React.CSSProperties {
 const convertMenuItemLabelStyle: React.CSSProperties = {
   display: "block",
 };
+
+function getAccountFilterButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    border: `1px solid ${active ? "#F26522" : "rgba(31, 58, 104, 0.18)"}`,
+    background: active ? "#F26522" : "#fff",
+    color: active ? "#fff" : "#1F3A68",
+    borderRadius: 7,
+    padding: "6px 10px",
+    fontSize: "10px",
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  };
+}

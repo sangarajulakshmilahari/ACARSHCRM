@@ -16,6 +16,14 @@ export async function GET(req: NextRequest) {
     }
 
     const pool = await getPool();
+    const { searchParams } = new URL(req.url);
+    const customerView = String(searchParams.get("customerView") || "all").trim().toLowerCase();
+    const recordTypeClause =
+      customerView === "customer_lead"
+        ? "AND COALESCE(l.RecordType, '') = 'CUSTOMER_LEAD'"
+        : customerView === "customer"
+          ? "AND COALESCE(l.RecordType, 'CUSTOMER') = 'CUSTOMER'"
+          : "";
 
     const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
     const baseQuery = `
@@ -37,7 +45,8 @@ export async function GET(req: NextRequest) {
         cr.Role AS ContactRoleName,
         u.UserName AS OwnerName,
         at.AccountTypeId,
-        at.Name
+        at.Name,
+        l.RecordType
       FROM Leads l
       LEFT JOIN LeadContacts lc
         ON lc.LeadId = l.LeadId
@@ -67,6 +76,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN LeadStatuses las
         ON latestActivity.StatusId = las.StatusId
       WHERE at.Name = 'Account'
+      ${recordTypeClause}
       AND ${visibility.clause}
       ORDER BY l.CreatedOn DESC
     `;
@@ -95,6 +105,7 @@ export async function GET(req: NextRequest) {
           AccountTypeId: row.AccountTypeId,
           AccountTypeName: row.Name,
           Name: row.Name,
+          RecordType: row.RecordType,
           Contacts: [],
         };
       }
@@ -142,6 +153,7 @@ export async function POST(req: Request) {
       ContactPhone,
       ContactTitle,
       ContactRoleName,
+      RecordType,
       AddReminder,
     } = body;
 
@@ -173,8 +185,8 @@ export async function POST(req: Request) {
     const [leadInsert]: any = await conn.query(
       `
       INSERT INTO Leads
-        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, OwnerId, AccountTypeId)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, OwnerId, AccountTypeId, RecordType)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         CompanyName,
@@ -184,6 +196,7 @@ export async function POST(req: Request) {
         Notes,
         OwnerId,
         AccountTypeId,
+        RecordType || null,
       ]
     );
 

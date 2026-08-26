@@ -61,7 +61,7 @@ export async function POST(
       const [projectRows]: any = await conn.query(
         `
         SELECT ProjectId
-        FROM projects
+        FROM Projects
         WHERE ProjectId = ?
           AND CustomerId = ?
           AND COALESCE(IsHidden, 0) = 0
@@ -435,7 +435,7 @@ export async function GET(
         GROUP_CONCAT(sc.SubCategoryName SEPARATOR ', ') AS Technology,
         GROUP_CONCAT(sc.SubCategoryId SEPARATOR ',') AS TechnologyIds
       FROM Opportunities o
-      LEFT JOIN projects pr ON o.ProjectId = pr.ProjectId
+      LEFT JOIN Projects pr ON o.ProjectId = pr.ProjectId
       LEFT JOIN Services s ON o.ServiceId = s.ServiceId
       LEFT JOIN Probability p ON o.ProbabilityId = p.ProbabilityId
       LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId
@@ -515,7 +515,7 @@ function getOpportunitySelectQuery() {
 
       o.CreatedOn AS CreatedDate
     FROM Opportunities o
-    LEFT JOIN projects pr ON o.ProjectId = pr.ProjectId
+    LEFT JOIN Projects pr ON o.ProjectId = pr.ProjectId
     LEFT JOIN Services s ON o.ServiceId = s.ServiceId
     LEFT JOIN Probability p ON o.ProbabilityId = p.ProbabilityId
     LEFT JOIN Opportunities_Status os ON o.Opportunity_StatusId = os.Opportunity_StatusId

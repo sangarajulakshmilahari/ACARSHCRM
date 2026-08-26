@@ -315,7 +315,7 @@ export default function WebPageClient(): JSX.Element {
                         loading={loading}
                         error={error}
                         onAddLead={() => setActiveTab("addAccount")}
-                        onAddLead2={() => setActiveTab("addLead")}
+                        onAddLead2={() => setActiveTab("addAccount")}
                         onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
                             setSelectedLeadOrigin(origin ?? "Account");
