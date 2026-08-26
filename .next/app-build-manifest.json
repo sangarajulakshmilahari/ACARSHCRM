@@ -40,6 +40,15 @@
       "static/chunks/929-45ce992486dffb4c.js",
       "static/chunks/app/webpage/dashboard/page-e865bb3e1a570f71.js"
     ],
+    "/webpage/leads/addleed/page": [
+      "static/chunks/webpack-3f511a5b4917b842.js",
+      "static/chunks/fd9d1056-b91c8372f747575e.js",
+      "static/chunks/117-2a57f17916655ee3.js",
+      "static/chunks/main-app-e5164a1f870225fb.js",
+      "static/chunks/80-d18d623e6f421ba9.js",
+      "static/chunks/24-52dc430af9bfc616.js",
+      "static/chunks/app/webpage/leads/addleed/page-0422eaab3efa1068.js"
+    ],
     "/webpage/page": [
       "static/chunks/webpack-3f511a5b4917b842.js",
       "static/chunks/fd9d1056-b91c8372f747575e.js",
@@ -55,16 +64,7 @@
       "static/chunks/141-ac10c5ff178b3d5e.js",
       "static/chunks/929-45ce992486dffb4c.js",
       "static/chunks/24-52dc430af9bfc616.js",
-      "static/chunks/app/webpage/page-067c31988fca84ad.js"
-    ],
-    "/webpage/leads/addleed/page": [
-      "static/chunks/webpack-3f511a5b4917b842.js",
-      "static/chunks/fd9d1056-b91c8372f747575e.js",
-      "static/chunks/117-2a57f17916655ee3.js",
-      "static/chunks/main-app-e5164a1f870225fb.js",
-      "static/chunks/80-d18d623e6f421ba9.js",
-      "static/chunks/24-52dc430af9bfc616.js",
-      "static/chunks/app/webpage/leads/addleed/page-0422eaab3efa1068.js"
+      "static/chunks/app/webpage/page-baafb79bd7809439.js"
     ],
     "/webpage/leads/Editlead/page": [
       "static/chunks/webpack-3f511a5b4917b842.js",

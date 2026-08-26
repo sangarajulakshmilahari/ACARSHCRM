@@ -32,7 +32,6 @@ export type Employee = {
   AccountTypeId?: number | string | null;
   AccountTypeName?: string | null;
   Name?: string | null;
-  RecordType?: string | null;
   Contacts: Contact[];
 };
 
@@ -77,7 +76,6 @@ export default function EmployeeList({
   const [hoveredConvertMenuItem, setHoveredConvertMenuItem] = useState<
     string | null
   >(null);
-  const showActionsColumn = type !== "account";
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [analytics, setAnalytics] = useState<OutreachAnalytics>({
     totalLinkedInRequestsSent: 0,
@@ -185,82 +183,35 @@ export default function EmployeeList({
       return recordType === type;
     });
 
-    const filtered = !q
-      ? scopedEmployees
-      : scopedEmployees.filter((emp) => {
-          const recordType = getRecordType(emp);
-          const haystack = [
-            recordType.label,
-            emp.CompanyName,
-            emp.CompanyLocation,
-            emp.LeadSource,
-            emp.StatusName,
-            emp.OwnerName,
-            emp.CreatedOn,
-            emp.LatestActivityNotes,
-            emp.LeadNotes,
-            ...(emp.Contacts || []).flatMap((c) => [
-              c.ContactName,
-              c.ContactRoleName,
-              c.ContactTitle,
-              c.ContactEmail,
-              c.ContactPhone,
-            ]),
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
+    if (!q) return scopedEmployees;
 
-          return haystack.includes(q);
-        });
+    return scopedEmployees.filter((emp) => {
+      const recordType = getRecordType(emp);
+      const haystack = [
+        recordType.label,
+        emp.CompanyName,
+        emp.CompanyLocation,
+        emp.LeadSource,
+        emp.StatusName,
+        emp.OwnerName,
+        emp.CreatedOn,
+        emp.LatestActivityNotes,
+        emp.LeadNotes,
+        ...(emp.Contacts || []).flatMap((c) => [
+          c.ContactName,
+          c.ContactRoleName,
+          c.ContactTitle,
+          c.ContactEmail,
+          c.ContactPhone,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-    return [...filtered].sort((a, b) => {
-      const bTime = getEntryTime(b);
-      const aTime = getEntryTime(a);
-      const bId = Number(b.LeadId);
-      const aId = Number(a.LeadId);
-
-      if (bTime !== aTime) return bTime - aTime;
-
-      if (Number.isFinite(bId) && Number.isFinite(aId)) return bId - aId;
-
-      return String(b.LeadId).localeCompare(String(a.LeadId));
+      return haystack.includes(q);
     });
   }, [employeesList, query, type]);
-
-  const tableSections = useMemo(() => {
-    if (type !== "account") {
-      return [
-        {
-          key: "default",
-          title: null as string | null,
-          subtitle: null as string | null,
-          rows: filteredEmployees,
-        },
-      ];
-    }
-
-    const customerLeads = filteredEmployees.filter(
-      (emp) => String(emp.RecordType || "").trim().toUpperCase() === "CUSTOMER_LEAD",
-    );
-    const customers = filteredEmployees.filter((emp) => {
-      const value = String(emp.RecordType || "").trim().toUpperCase();
-      return value === "CUSTOMER" || value === "";
-    });
-
-    return [
-      {
-        key: "customers",
-        title: "Customers",
-        rows: customers,
-      },
-      {
-        key: "customer-leads",
-        title: "Customer Leads",
-        rows: customerLeads,
-      },
-    ];
-  }, [type, filteredEmployees]);
 
   const outreachKpis = useMemo(
     () => [
@@ -268,8 +219,8 @@ export default function EmployeeList({
         key: "sent",
         label: "LinkedIn Requests Sent",
         value: analytics.totalLinkedInRequestsSent,
-        iconBg: "rgba(18, 183, 201, 0.12)",
-        iconColor: "#12B7C9",
+        iconBg: "#dbeafe",
+        iconColor: "#1d4ed8",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -282,8 +233,8 @@ export default function EmployeeList({
         key: "accepted",
         label: "LinkedIn Requests Accepted",
         value: analytics.totalLinkedInRequestsAccepted,
-        iconBg: "rgba(31, 58, 104, 0.1)",
-        iconColor: "#1F3A68",
+        iconBg: "#dcfce7",
+        iconColor: "#15803d",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/>
@@ -296,8 +247,8 @@ export default function EmployeeList({
         key: "email",
         label: "Emails Sent",
         value: analytics.totalEmailsSent,
-        iconBg: "rgba(242, 101, 34, 0.14)",
-        iconColor: "#F26522",
+        iconBg: "#ffedd5",
+        iconColor: "#c2410c",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,4 12,13 2,4"/>
@@ -310,8 +261,8 @@ export default function EmployeeList({
         key: "rate",
         label: "LinkedIn Acceptance Rate",
         value: `${analytics.acceptanceRate}%`,
-        iconBg: "rgba(15, 31, 61, 0.1)",
-        iconColor: "#0F1F3D",
+        iconBg: "#ede9fe",
+        iconColor: "#6d28d9",
         icon: (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
@@ -327,7 +278,7 @@ export default function EmployeeList({
   if (error) return <div style={{ color: "red" }}>Error: {error}</div>;
 
   const baseFontStyles: React.CSSProperties = {
-    fontFamily: "var(--font-body)",
+    fontFamily: "Open Sans, sans-serif",
     fontSize: "10px",
     lineHeight: 1.35,
     letterSpacing: "0.2px",
@@ -347,8 +298,8 @@ export default function EmployeeList({
       style={{
         background: "#ffffff",
         borderRadius: 12,
-        boxShadow: "0 12px 28px rgba(15, 31, 61, 0.08)",
-        border: "1px solid rgba(31, 58, 104, 0.14)",
+        boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
+        border: "1px solid #e9eef7",
         overflow: "hidden",
         height: "100%",
         minHeight: 0,
@@ -361,7 +312,7 @@ export default function EmployeeList({
         style={{
           padding: "14px 18px 10px",
           background: "#ffffff",
-          borderBottom: "1px solid rgba(31, 58, 104, 0.14)",
+          borderBottom: "1px solid #e9eef7",
           flexShrink: 0,
         }}
       >
@@ -377,14 +328,14 @@ export default function EmployeeList({
               key={kpi.key}
               title={kpi.tooltip}
               style={{
-                border: "1px solid rgba(31, 58, 104, 0.12)",
+                border: "1px solid #e7ecf4",
                 borderRadius: 10,
                 padding: "9px 10px",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
                 minHeight: 58,
-                background: "linear-gradient(180deg, #ffffff 0%, #fbf8f4 100%)",
+                background: "linear-gradient(180deg, #ffffff 0%, #f9fbff 100%)",
               }}
             >
               <span
@@ -420,7 +371,7 @@ export default function EmployeeList({
                     marginTop: 3,
                     fontSize: 18,
                     fontWeight: 700,
-                    color: "#0F1F3D",
+                    color: "#0f172a",
                     letterSpacing: "0.2px",
                   }}
                 >
@@ -446,7 +397,7 @@ export default function EmployeeList({
           <button
             onClick={onAddLead}
             style={{
-              background: "#F26522",
+              background: "#3a77e3",
               color: "white",
               padding: "7px 12px",
               border: "none",
@@ -464,7 +415,7 @@ export default function EmployeeList({
             <button
               onClick={() => onAddLead2()}
               style={{
-                background: "#F26522",
+                background: "#3a77e3",
                 color: "white",
                 padding: "7px 12px",
                 border: "none",
@@ -475,7 +426,7 @@ export default function EmployeeList({
                 fontFamily: "inherit",
               }}
             >
-              Add Customer Lead
+              Add Lead
             </button>
           )}
         </div>
@@ -509,10 +460,10 @@ export default function EmployeeList({
               paddingLeft: "45px",
               borderRadius: 10,
               border: isSearchFocused
-                ? "1.5px solid #F26522"
-                : "1px solid rgba(31, 58, 104, 0.2)",
+                ? "1.5px solid #4a90e2"
+                : "1px solid #d8e1ef",
               boxShadow: isSearchFocused
-                ? "0 0 0 3px rgba(242, 101, 34, 0.14)"
+                ? "0 0 8px rgba(8, 40, 218, 0.12)"
                 : "none",
               fontSize: "10.05px",
               outline: "none",
@@ -531,70 +482,52 @@ export default function EmployeeList({
           minHeight: 0,
           overflowY: "auto",
           overflowX: "auto",
-          borderTop: "1px solid rgba(31, 58, 104, 0.12)",
-          display: "grid",
-          gap: type === "account" ? 16 : 0,
-          padding: type === "account" ? 12 : 0,
+          borderTop: "1px solid #edf2fa",
         }}
       >
-        {tableSections.map((section) => (
-          <div key={section.key} style={{ border: type === "account" ? "1px solid rgba(31, 58, 104, 0.12)" : "none", borderRadius: type === "account" ? 10 : 0, overflow: "hidden", background: "#fff" }}>
-            {section.title && (
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid rgba(31, 58, 104, 0.12)", background: "#fff" }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#1F3A68" }}>{section.title}</div>
-              </div>
-            )}
+        <table
+          style={{
+            width: "100%",
+            tableLayout: "fixed",
+            borderCollapse:
+              "collapse" as unknown as React.CSSProperties["borderCollapse"],
+            borderSpacing: 0,
+            minWidth: 1040,
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: 1.35,
+            letterSpacing: "0.2px",
+            borderStyle: "solid",
+            borderWidth: 0,
+          }}
+        >
+          <colgroup>
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "18%" }} />
+            <col style={{ width: "29%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "11%" }} />
+          </colgroup>
 
-            <div
-              style={{
-                overflowX: "auto",
-                overflowY: type === "account" ? "auto" : "visible",
-                maxHeight: type === "account" ? 320 : undefined,
-              }}
-            >
-              <table
-                style={{
-                  width: "100%",
-                  tableLayout: "fixed",
-                  borderCollapse:
-                    "collapse" as unknown as React.CSSProperties["borderCollapse"],
-                  borderSpacing: 0,
-                  minWidth: showActionsColumn ? 1040 : 930,
-                  fontFamily: "inherit",
-                  fontSize: "inherit",
-                  lineHeight: 1.35,
-                  letterSpacing: "0.2px",
-                  borderStyle: "solid",
-                  borderWidth: 0,
-                }}
-              >
-                <colgroup>
-                  <col style={{ width: "13%" }} />
-                  <col style={{ width: "9%" }} />
-                  <col style={{ width: "18%" }} />
-                  <col style={{ width: "29%" }} />
-                  <col style={{ width: "8%" }} />
-                  <col style={{ width: "11%" }} />
-                  {showActionsColumn && <col style={{ width: "11%" }} />}
-                </colgroup>
+          <thead>
+            <tr>
+              <th style={thStyle}>Owner</th>
+              <th style={thStyle}>Company</th>
+              <th style={thStyle}>Contacts</th>
+              <th style={thStyle}>Source</th>
+              <th style={thStyle}>Status</th>
+              <th style={thStyle}>Date of Entry</th>
+              <th style={thStyle}>Actions</th>
+            </tr>
+          </thead>
 
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Owner</th>
-                    <th style={thStyle}>Company</th>
-                    <th style={thStyle}>Contacts</th>
-                    <th style={thStyle}>Source</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Date of Entry</th>
-                    {showActionsColumn && <th style={thStyle}>Actions</th>}
-                  </tr>
-                </thead>
-
-                <tbody>
-            {section.rows.map((emp, idx) => {
+          <tbody>
+            {filteredEmployees.map((emp, idx) => {
               const rowStyle: React.CSSProperties = {
                 ...trStyle,
-                backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fbf8f4",
+                backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fbff",
               };
               const statusText = emp.StatusName?.trim() || "";
               const latestActivityNote = emp.LatestActivityNotes?.trim() || "";
@@ -605,7 +538,7 @@ export default function EmployeeList({
               return (
                 <tr
                   key={emp.LeadId}
-                  onClick={() =>
+                  onDoubleClick={() =>
                     onOpenLeadDetails?.(emp.LeadId, convertOrigin)
                   }
                   style={{
@@ -689,7 +622,7 @@ export default function EmployeeList({
                             }}
                           >
                             <div
-                              title="Click to open details"
+                              title="Double click to open details"
                               style={{
                                 fontWeight: 700,
                                 color: "#212529",
@@ -757,7 +690,6 @@ export default function EmployeeList({
 
                                 <a
                                   href={`mailto:${c.ContactEmail}`}
-                                  onClick={(e) => e.stopPropagation()}
                                   style={{
                                     color: "#6c7293",
                                     textDecoration: "none",
@@ -794,7 +726,6 @@ export default function EmployeeList({
                                 </span>
                                 <a
                                   href={`tel:${c.ContactPhone}`}
-                                  onClick={(e) => e.stopPropagation()}
                                   style={{
                                     color: "inherit",
                                     textDecoration: "none",
@@ -814,11 +745,11 @@ export default function EmployeeList({
                             style={{
                               marginTop: 4,
                               fontSize: "inherit",
-                              color: "#F26522",
+                              color: "#3a77e3",
                               fontWeight: 600,
                               cursor: "pointer",
                             }}
-                            title="Click the row to view all contacts"
+                            title="Double-click the row to view all contacts"
                           >
                             +{emp.Contacts.length - 2} more
                           </div>
@@ -853,9 +784,9 @@ export default function EmployeeList({
                             maxWidth: "100%",
                             padding: "4px 10px",
                             borderRadius: 12,
-                            border: "1px solid rgba(31, 58, 104, 0.18)",
-                            background: "rgba(31, 58, 104, 0.08)",
-                            color: "#1F3A68",
+                            border: "1px solid #dbe7ff",
+                            background: "#edf4ff",
+                            color: "#1e40af",
                             fontSize: "inherit",
                             fontWeight: 700,
                             textTransform: "uppercase",
@@ -899,207 +830,202 @@ export default function EmployeeList({
                     </div>
                   </td>
 
-                  {showActionsColumn && (
-                    <td
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        ...tdStyle,
-                        textAlign: "center",
-                        verticalAlign: "middle",
-                        position: "relative",
-                      }}
-                    >
-                      {recordType.type === "lead" ? (
-                        <div
-                          data-convert-menu-root="true"
-                          style={convertMenuRootStyle}
-                        >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenConvertMenuLeadId((prev) =>
-                                prev === emp.LeadId ? null : emp.LeadId
-                              );
-                            }}
-                            style={getConvertActionButtonStyle(
-                              openConvertMenuLeadId === emp.LeadId
-                            )}
-                            title="Convert"
-                          >
-                            <span>Convert</span>
-                            <span style={{ fontSize: 8 }}>v</span>
-                          </button>
-
-                          {openConvertMenuLeadId === emp.LeadId && (
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              style={convertMenuStyle}
-                            >
-                              <button
-                                onClick={async () => {
-                                  setOpenConvertMenuLeadId(null);
-                                  await convertLeadWithExistingFlow({
-                                    leadId: emp.LeadId,
-                                    origin: convertOrigin,
-                                    router,
-                                  });
-                                }}
-                                onMouseEnter={() =>
-                                  setHoveredConvertMenuItem(
-                                    `${String(emp.LeadId)}-prospect`
-                                  )
-                                }
-                                onMouseLeave={() =>
-                                  setHoveredConvertMenuItem(null)
-                                }
-                                style={getConvertMenuItemStyle(
-                                  hoveredConvertMenuItem ===
-                                    `${String(emp.LeadId)}-prospect`
-                                )}
-                              >
-                                <span style={convertMenuItemLabelStyle}>
-                                  Convert to Prospect
-                                </span>
-                              </button>
-
-                              <button
-                                onClick={async () => {
-                                  setOpenConvertMenuLeadId(null);
-                                  await convertLeadDirectToAccountWithExistingFlow({
-                                    leadId: emp.LeadId,
-                                    router,
-                                  });
-                                }}
-                                onMouseEnter={() =>
-                                  setHoveredConvertMenuItem(
-                                    `${String(emp.LeadId)}-account`
-                                  )
-                                }
-                                onMouseLeave={() =>
-                                  setHoveredConvertMenuItem(null)
-                                }
-                                style={getConvertMenuItemStyle(
-                                  hoveredConvertMenuItem ===
-                                    `${String(emp.LeadId)}-account`
-                                )}
-                              >
-                                <span style={convertMenuItemLabelStyle}>
-                                  Convert to Customer
-                                </span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : recordType.type === "prospect" ? (
-                        <div
-                          data-convert-menu-root="true"
-                          style={convertMenuRootStyle}
-                        >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenConvertMenuLeadId((prev) =>
-                                prev === emp.LeadId ? null : emp.LeadId
-                              );
-                            }}
-                            style={getConvertActionButtonStyle(
-                              openConvertMenuLeadId === emp.LeadId
-                            )}
-                            title="Convert"
-                          >
-                            <span>Convert</span>
-                            <span style={{ fontSize: 8 }}>v</span>
-                          </button>
-
-                          {openConvertMenuLeadId === emp.LeadId && (
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              style={convertMenuStyle}
-                            >
-                              <button
-                                onClick={async () => {
-                                  setOpenConvertMenuLeadId(null);
-                                  await convertLeadWithExistingFlow({
-                                    leadId: emp.LeadId,
-                                    origin: convertOrigin,
-                                    router,
-                                    target: "Lead",
-                                  });
-                                }}
-                                onMouseEnter={() =>
-                                  setHoveredConvertMenuItem(
-                                    `${String(emp.LeadId)}-move-lead`
-                                  )
-                                }
-                                onMouseLeave={() =>
-                                  setHoveredConvertMenuItem(null)
-                                }
-                                style={getConvertMenuItemStyle(
-                                  hoveredConvertMenuItem ===
-                                    `${String(emp.LeadId)}-move-lead`
-                                )}
-                              >
-                                <span style={convertMenuItemLabelStyle}>
-                                  Move to Lead
-                                </span>
-                              </button>
-
-                              <button
-                                onClick={async () => {
-                                  setOpenConvertMenuLeadId(null);
-                                  await convertLeadWithExistingFlow({
-                                    leadId: emp.LeadId,
-                                    origin: convertOrigin,
-                                    router,
-                                    target: "Account",
-                                  });
-                                }}
-                                onMouseEnter={() =>
-                                  setHoveredConvertMenuItem(
-                                    `${String(emp.LeadId)}-account`
-                                  )
-                                }
-                                onMouseLeave={() =>
-                                  setHoveredConvertMenuItem(null)
-                                }
-                                style={getConvertMenuItemStyle(
-                                  hoveredConvertMenuItem ===
-                                    `${String(emp.LeadId)}-account`
-                                )}
-                              >
-                                <span style={convertMenuItemLabelStyle}>
-                                  Convert to Customer
-                                </span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
+                  <td
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    style={{
+                      ...tdStyle,
+                      textAlign: "center",
+                      verticalAlign: "middle",
+                      position: "relative",
+                    }}
+                  >
+                    {recordType.type === "lead" ? (
+                      <div
+                        data-convert-menu-root="true"
+                        style={convertMenuRootStyle}
+                      >
                         <button
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            await convertLeadWithExistingFlow({
-                              leadId: emp.LeadId,
-                              origin: convertOrigin,
-                              router,
-                            });
+                            setOpenConvertMenuLeadId((prev) =>
+                              prev === emp.LeadId ? null : emp.LeadId
+                            );
                           }}
-                          style={getConvertActionButtonStyle(false)}
+                          style={getConvertActionButtonStyle(
+                            openConvertMenuLeadId === emp.LeadId
+                          )}
                           title="Convert"
                         >
-                          Convert
+                          <span>Convert</span>
+                          <span style={{ fontSize: 8 }}>v</span>
                         </button>
-                      )}
-                    </td>
-                  )}
+
+                        {openConvertMenuLeadId === emp.LeadId && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={convertMenuStyle}
+                          >
+                            <button
+                              onClick={async () => {
+                                setOpenConvertMenuLeadId(null);
+                                await convertLeadWithExistingFlow({
+                                  leadId: emp.LeadId,
+                                  origin: convertOrigin,
+                                  router,
+                                });
+                              }}
+                              onMouseEnter={() =>
+                                setHoveredConvertMenuItem(
+                                  `${String(emp.LeadId)}-prospect`
+                                )
+                              }
+                              onMouseLeave={() =>
+                                setHoveredConvertMenuItem(null)
+                              }
+                              style={getConvertMenuItemStyle(
+                                hoveredConvertMenuItem ===
+                                  `${String(emp.LeadId)}-prospect`
+                              )}
+                            >
+                              <span style={convertMenuItemLabelStyle}>
+                                Convert to Prospect
+                              </span>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                setOpenConvertMenuLeadId(null);
+                                await convertLeadDirectToAccountWithExistingFlow({
+                                  leadId: emp.LeadId,
+                                  router,
+                                });
+                              }}
+                              onMouseEnter={() =>
+                                setHoveredConvertMenuItem(
+                                  `${String(emp.LeadId)}-account`
+                                )
+                              }
+                              onMouseLeave={() =>
+                                setHoveredConvertMenuItem(null)
+                              }
+                              style={getConvertMenuItemStyle(
+                                hoveredConvertMenuItem ===
+                                  `${String(emp.LeadId)}-account`
+                              )}
+                            >
+                              <span style={convertMenuItemLabelStyle}>
+                                Convert to Customer
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : recordType.type === "prospect" ? (
+                      <div
+                        data-convert-menu-root="true"
+                        style={convertMenuRootStyle}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenConvertMenuLeadId((prev) =>
+                              prev === emp.LeadId ? null : emp.LeadId
+                            );
+                          }}
+                          style={getConvertActionButtonStyle(
+                            openConvertMenuLeadId === emp.LeadId
+                          )}
+                          title="Convert"
+                        >
+                          <span>Convert</span>
+                          <span style={{ fontSize: 8 }}>v</span>
+                        </button>
+
+                        {openConvertMenuLeadId === emp.LeadId && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={convertMenuStyle}
+                          >
+                            <button
+                              onClick={async () => {
+                                setOpenConvertMenuLeadId(null);
+                                await convertLeadWithExistingFlow({
+                                  leadId: emp.LeadId,
+                                  origin: convertOrigin,
+                                  router,
+                                  target: "Lead",
+                                });
+                              }}
+                              onMouseEnter={() =>
+                                setHoveredConvertMenuItem(
+                                  `${String(emp.LeadId)}-move-lead`
+                                )
+                              }
+                              onMouseLeave={() =>
+                                setHoveredConvertMenuItem(null)
+                              }
+                              style={getConvertMenuItemStyle(
+                                hoveredConvertMenuItem ===
+                                  `${String(emp.LeadId)}-move-lead`
+                              )}
+                            >
+                              <span style={convertMenuItemLabelStyle}>
+                                Move to Lead
+                              </span>
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                setOpenConvertMenuLeadId(null);
+                                await convertLeadWithExistingFlow({
+                                  leadId: emp.LeadId,
+                                  origin: convertOrigin,
+                                  router,
+                                  target: "Account",
+                                });
+                              }}
+                              onMouseEnter={() =>
+                                setHoveredConvertMenuItem(
+                                  `${String(emp.LeadId)}-account`
+                                )
+                              }
+                              onMouseLeave={() =>
+                                setHoveredConvertMenuItem(null)
+                              }
+                              style={getConvertMenuItemStyle(
+                                hoveredConvertMenuItem ===
+                                  `${String(emp.LeadId)}-account`
+                              )}
+                            >
+                              <span style={convertMenuItemLabelStyle}>
+                                Convert to Customer
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await convertLeadWithExistingFlow({
+                            leadId: emp.LeadId,
+                            origin: convertOrigin,
+                            router,
+                          });
+                        }}
+                        style={getConvertActionButtonStyle(false)}
+                        title="Convert"
+                      >
+                        Convert
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1129,33 +1055,19 @@ function getDetailsOrigin(type: EntityType): DetailsOrigin {
   return "leads";
 }
 
-function getEntryTime(emp: Employee): number {
-  const value = emp.CreatedOn ?? emp.LeadDate;
-  if (value == null || value === "") return 0;
-
-  const time =
-    value instanceof Date
-      ? value.getTime()
-      : typeof value === "number"
-        ? new Date(value).getTime()
-        : Date.parse(String(value));
-
-  return Number.isFinite(time) ? time : 0;
-}
-
 function getCompanyCellStyle(type: EntityType): React.CSSProperties {
   const palette: Record<EntityType, React.CSSProperties> = {
     lead: {
       background: "#ffffff",
-      color: "#1F3A68",
+      color: "#334155",
     },
     prospect: {
-      background: "rgba(242, 101, 34, 0.12)",
-      color: "#9B3F14",
+      background: "#fef3c7",
+      color: "#92400e",
     },
     account: {
-      background: "rgba(18, 183, 201, 0.12)",
-      color: "#0A6570",
+      background: "#dcfce7",
+      color: "#166534",
     },
   };
 
@@ -1171,10 +1083,10 @@ function formatDate(value: string | number | Date | null | undefined) {
 const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "11px 12px",
-  border: "0.5px solid rgba(248, 244, 239, 0.12)",
+  border: "0.5px solid #1e2b42",
   fontWeight: 700,
   fontSize: "13px",
-  backgroundColor: "#0F1F3D",
+  backgroundColor: "#202939",
   color: "#ffffff",
   position: "sticky",
   top: 0,
@@ -1186,7 +1098,7 @@ const thStyle: React.CSSProperties = {
 
 const tdStyle: React.CSSProperties = {
   padding: "7px 10px",
-  border: "0.5px solid rgba(31, 58, 104, 0.12)",
+  border: "0.5px solid #e6ebf2",
   verticalAlign: "top",
   fontSize: "10.05px",
   fontFamily: "inherit",
@@ -1210,9 +1122,9 @@ const convertActionButtonStyle: React.CSSProperties = {
   minWidth: 0,
   padding: "6px 10px",
   borderRadius: 8,
-  border: "1px solid rgba(242, 101, 34, 0.24)",
-  background: "rgba(242, 101, 34, 0.08)",
-  color: "#F26522",
+  border: "1px solid #c7dafd",
+  background: "#f7faff",
+  color: "#2459d3",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: "11px",
@@ -1223,7 +1135,7 @@ const convertActionButtonStyle: React.CSSProperties = {
   justifyContent: "center",
   gap: 6,
   whiteSpace: "nowrap",
-  boxShadow: "0 1px 2px rgba(242, 101, 34, 0.08)",
+  boxShadow: "0 1px 2px rgba(37, 89, 211, 0.08)",
   transition:
     "background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
 };
@@ -1231,12 +1143,12 @@ const convertActionButtonStyle: React.CSSProperties = {
 function getConvertActionButtonStyle(isOpen: boolean): React.CSSProperties {
   return {
     ...convertActionButtonStyle,
-    background: isOpen ? "#F26522" : "rgba(242, 101, 34, 0.08)",
-    color: isOpen ? "#ffffff" : "#F26522",
-    borderColor: isOpen ? "#F26522" : "rgba(242, 101, 34, 0.24)",
+    background: isOpen ? "#2459d3" : "#f7faff",
+    color: isOpen ? "#ffffff" : "#2459d3",
+    borderColor: isOpen ? "#2459d3" : "#c7dafd",
     boxShadow: isOpen
-      ? "0 8px 18px rgba(242, 101, 34, 0.22)"
-      : "0 1px 2px rgba(242, 101, 34, 0.08)",
+      ? "0 8px 18px rgba(37, 89, 211, 0.2)"
+      : "0 1px 2px rgba(37, 89, 211, 0.08)",
   };
 }
 
@@ -1246,9 +1158,9 @@ const convertMenuStyle: React.CSSProperties = {
   right: 0,
   minWidth: 190,
   background: "#ffffff",
-  border: "1px solid rgba(31, 58, 104, 0.16)",
+  border: "1px solid #dbe4f2",
   borderRadius: 12,
-  boxShadow: "0 18px 40px rgba(15, 31, 61, 0.16)",
+  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.16)",
   padding: 8,
   display: "flex",
   flexDirection: "column",
@@ -1274,26 +1186,11 @@ const convertMenuItemStyle: React.CSSProperties = {
 function getConvertMenuItemStyle(isHovered: boolean): React.CSSProperties {
   return {
     ...convertMenuItemStyle,
-    background: isHovered ? "rgba(242, 101, 34, 0.09)" : "#ffffff",
-    color: isHovered ? "#F26522" : "#1f2937",
+    background: isHovered ? "#eef4ff" : "#ffffff",
+    color: isHovered ? "#1d4ed8" : "#1f2937",
   };
 }
 
 const convertMenuItemLabelStyle: React.CSSProperties = {
   display: "block",
 };
-
-function getAccountFilterButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    border: `1px solid ${active ? "#F26522" : "rgba(31, 58, 104, 0.18)"}`,
-    background: active ? "#F26522" : "#fff",
-    color: active ? "#fff" : "#1F3A68",
-    borderRadius: 7,
-    padding: "6px 10px",
-    fontSize: "10px",
-    fontWeight: 700,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    whiteSpace: "nowrap",
-  };
-}
