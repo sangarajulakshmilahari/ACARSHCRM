@@ -1,10 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
 
 export async function POST(
-  req: Request,
+  req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const leadId = Number(params.leadID);
 
   let requestedTarget: string | undefined;
@@ -25,6 +33,20 @@ export async function POST(
   }
 
   const pool = await getPool();
+  let companyId: number;
+  try {
+    companyId = requireCompanyId(authUser);
+  } catch (error) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
+    throw error;
+  }
+  const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+  if (!hasLeadAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   let conn: any;
 
   try {
@@ -41,8 +63,9 @@ export async function POST(
       LEFT JOIN AccountTypes at
         ON l.AccountTypeId = at.AccountTypeId
       WHERE l.LeadId = ?
+        AND l.CompanyId = ?
       `,
-      [leadId]
+      [leadId, companyId]
     );
 
     const currentType = currentTypeRows[0]?.Name ?? "Lead";
@@ -112,8 +135,9 @@ export async function POST(
       UPDATE Leads
       SET AccountTypeId = ?
       WHERE LeadId = ?
+        AND CompanyId = ?
       `,
-      [accountTypeId, leadId]
+      [accountTypeId, leadId, companyId]
     );
 
     await conn.commit();

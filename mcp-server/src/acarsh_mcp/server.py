@@ -11,7 +11,7 @@ from mcp.types import ToolAnnotations
 from sqlalchemy.exc import SQLAlchemyError
 
 from acarsh_mcp import __version__
-from acarsh_mcp.access import ActorProvider
+from acarsh_mcp.access import ActorProvider, CompanyMembership
 from acarsh_mcp.catalog import get_entity, public_catalog
 from acarsh_mcp.config import get_settings
 from acarsh_mcp.crm import CRMService
@@ -52,7 +52,29 @@ logger = logging.getLogger("acarsh_mcp")
 settings = get_settings()
 database = Database(settings)
 compiler = QueryCompiler(settings)
-actors = ActorProvider(settings)
+
+
+def memberships_for_user(user_id: int) -> list[CompanyMembership]:
+    rows = database.fetch_all(
+        """
+        SELECT CompanyId, RoleId, IsDefault
+        FROM CompanyUsers
+        WHERE UserId = :user_id
+          AND IsActive = 1
+        ORDER BY IsDefault DESC, CompanyUserId ASC
+        """,
+        {"user_id": user_id},
+    )
+    return [
+        CompanyMembership(
+            company_id=int(row["CompanyId"]),
+            role_id=int(row["RoleId"]),
+            is_default=bool(row["IsDefault"]),
+        )
+        for row in rows
+    ]
+
+actors = ActorProvider(settings, memberships_for_user=memberships_for_user)
 queries = QueryService(database, compiler, actors)
 semantic_compiler = SemanticQueryCompiler(settings)
 semantic_queries = SemanticQueryService(database, semantic_compiler, actors)
@@ -93,6 +115,7 @@ ACTION_CATALOG = {
     ),
     "get_company_contacts": "Find accessible contact details by company name.",
     "pipeline_summary": "Explain the accessible lead funnel by type, owner, and status.",
+    "calculate_lead_score": "Calculate and store a deterministic lead score (/100) with breakdown.",
     "create_lead": "Create a lead, prospect, or account, optionally with contacts.",
     "update_lead": "Update a lead by id or company name, including string lookup values.",
     "delete_lead": "Soft-delete a lead by id or company name.",
@@ -166,6 +189,7 @@ def list_capabilities() -> dict:
                 "query_crm",
                 "get_company_contacts",
                 "pipeline_summary",
+                "calculate_lead_score",
             }
         ],
         "actions": ACTION_CATALOG,
@@ -216,6 +240,7 @@ def explain_capability(action: str | None = None) -> dict:
             "aggregate_records",
             "get_company_contacts",
             "pipeline_summary",
+            "calculate_lead_score",
         },
     }
 
@@ -334,6 +359,12 @@ def query_crm(plan: SemanticQueryPlan) -> dict:
 def pipeline_summary() -> dict:
     """Return role-scoped funnel counts grouped by type, owner and status."""
     return _call("pipeline_summary", crm.pipeline_summary)
+
+
+@mcp.tool(tags={"read", "analytics", "leads"}, annotations=READ_ONLY)
+def calculate_lead_score(lead_id: RecordReference) -> dict:
+    """Calculate and persist deterministic lead score for a lead by id or company name."""
+    return _call("calculate_lead_score", lambda: crm.calculate_lead_score(lead_id))
 
 
 @mcp.tool(tags={"read", "lookup"}, annotations=READ_ONLY)

@@ -8,6 +8,7 @@ type EntityType = "lead" | "prospect" | "account";
 
 type ApolloContactCandidate = {
   apolloPersonId: string;
+  apolloRawPersonId?: string | null;
   apolloOrganizationId: string | null;
   name: string;
   title: string | null;
@@ -122,6 +123,8 @@ export default function AddLeadPage({
     ContactLocation: "",
     ContactNotes: "",
     LinkedInURL: "",
+    LinkedInRequestSent: false,
+    LinkedInRequestAccepted: false,
 
     // Quick Actions
     AddReminder: false,
@@ -231,27 +234,64 @@ export default function AddLeadPage({
     setApolloError("");
     setApolloStatusMessage("Retrieving email...");
 
+    const apolloPersonId = String(
+      picked.apolloRawPersonId || picked.apolloPersonId || ""
+    ).trim();
+
+    if (!apolloPersonId) {
+      setApolloStatusMessage("");
+      setApolloError(
+        "Selected Apollo contact is missing a valid Apollo ID. Please pick another contact or refine your search."
+      );
+      return;
+    }
+
     try {
       setApolloEnrichLoading(true);
       setApolloStatusMessage("Retrieving phone number from Apollo...");
+      const enrichPayload = {
+        apolloPersonId,
+        apolloOrganizationId: picked.apolloOrganizationId || undefined,
+        linkedinUrl: picked.linkedinUrl || form.LinkedInURL || undefined,
+        contactName: picked.name || form.ContactName || undefined,
+        companyName: form.CompanyName || picked.organizationName || undefined,
+        companyDomain: getCompanyDomainIfAvailable(),
+      };
+
+      console.info("Apollo enrich request", {
+        hasApolloPersonId: Boolean(enrichPayload.apolloPersonId),
+        apolloPersonIdPreview: enrichPayload.apolloPersonId
+          ? `${enrichPayload.apolloPersonId.slice(0, 8)}...`
+          : null,
+        hasApolloOrganizationId: Boolean(enrichPayload.apolloOrganizationId),
+        hasLinkedinUrl: Boolean(enrichPayload.linkedinUrl),
+        hasContactName: Boolean(enrichPayload.contactName),
+        hasCompanyName: Boolean(enrichPayload.companyName),
+        hasCompanyDomain: Boolean(enrichPayload.companyDomain),
+      });
+
       const res = await fetch("/api/apollo/contacts/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apolloPersonId: picked.apolloPersonId,
-          apolloOrganizationId: picked.apolloOrganizationId,
-          linkedinUrl: picked.linkedinUrl || form.LinkedInURL,
-          contactName: picked.name || form.ContactName,
-          companyName: form.CompanyName,
-          companyDomain: getCompanyDomainIfAvailable(),
-          includeOrganization: false,
-        }),
+        body: JSON.stringify(enrichPayload),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setApolloStatusMessage("");
-        setApolloError(String(data?.error || "Apollo enrichment failed."));
+        const detailsText =
+          data?.details && typeof data.details === "object"
+            ? ` (${JSON.stringify(data.details)})`
+            : "";
+        const errorMessage =
+          data?.error ||
+          `Apollo enrichment failed (${res.status}: ${res.statusText})${detailsText}`;
+        setApolloError(String(errorMessage));
+        console.error("Apollo enrichment error", {
+          status: res.status,
+          error: data?.error,
+          details: data?.details,
+        });
         return;
       }
 
@@ -269,11 +309,17 @@ export default function AddLeadPage({
       }));
 
       if (!contact?.workEmail) {
-        setApolloError("Contact found, but work email is unavailable.");
+        setApolloError(
+          "Contact selected and saved, but work email is unavailable in Apollo. You can continue and enter email manually."
+        );
       } else if (phoneStatus === "unavailable") {
-        setApolloError("Phone number unavailable");
+        setApolloError(
+          "Contact selected and saved, but phone number is unavailable in Apollo."
+        );
       } else if (phoneStatus === "timeout") {
-        setApolloError("Retrieving phone number timed out. You can continue and edit phone manually.");
+        setApolloError(
+          "Contact selected and saved, but retrieving phone number timed out. You can edit phone manually."
+        );
       } else {
         setApolloError("");
       }
@@ -291,9 +337,14 @@ export default function AddLeadPage({
       setApolloPickerOpen(false);
       setApolloResults([]);
       setSelectedApolloPersonId("");
-    } catch {
+    } catch (error: any) {
       setApolloStatusMessage("");
-      setApolloError("Unable to enrich contact from Apollo right now.");
+      console.error("Apollo enrichment request failed", {
+        message: error?.message || "unknown",
+      });
+      setApolloError(
+        error?.message || "Unable to enrich contact from Apollo right now."
+      );
     } finally {
       setApolloEnrichLoading(false);
     }
@@ -793,6 +844,71 @@ const customSelectStyles = {
                   value={form.LinkedInURL}
                   onChange={handleChange}
                 />
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    flexWrap: "wrap",
+                    marginTop: 8,
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      color: "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!form.LinkedInRequestSent}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setForm((prev) => ({
+                          ...prev,
+                          LinkedInRequestSent: checked,
+                          LinkedInRequestAccepted: checked
+                            ? prev.LinkedInRequestAccepted
+                            : false,
+                        }));
+                      }}
+                      style={{ accentColor: "#F26522", cursor: "pointer" }}
+                    />
+                    Request Sent
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      color: "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!form.LinkedInRequestAccepted}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setForm((prev) => ({
+                          ...prev,
+                          LinkedInRequestAccepted: checked,
+                          LinkedInRequestSent: checked
+                            ? true
+                            : prev.LinkedInRequestSent,
+                        }));
+                      }}
+                      style={{ accentColor: "#F26522", cursor: "pointer" }}
+                    />
+                    Request Accepted
+                  </label>
+                </div>
               </div>
 
               <div style={{ gridColumn: "1 / span 3" }}>

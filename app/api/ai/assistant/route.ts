@@ -2,7 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveAuthUser, type ResolvedAuthUser } from "@/app/api/lib/auth";
 
-import { addActivityDirect, executeConfirmedWrites, runAgent } from "./agent";
+import { addActivityDirect, executeConfirmedWrites, runAgent, type AssistantPageContext } from "./agent";
+import {
+  buildAttachmentContextMessage,
+  processAttachmentsForAssistant,
+  tryBuildDirectAttachmentAnswer,
+} from "./document-parser";
+import {
+  applyImportMessage,
+  applyLeadImportUpdate,
+  clearPendingLeadImport,
+  confirmLeadImport,
+  getPendingLeadImport,
+  importReply,
+  isLeadImportIntent,
+  previewPendingLeadImport,
+  startLeadImport,
+} from "./lead-import/service";
+import type { AcarshField } from "./lead-import/mapping";
 import {
   agentHistory,
   createConversation,
@@ -25,10 +42,114 @@ type RequestBody = {
     | "confirm_write"
     | "reject_write"
     | "new_conversation"
-    | "load_conversation";
+    | "load_conversation"
+    | "lead_import_confirm"
+    | "lead_import_cancel"
+    | "lead_import_update";
   sessionId?: string;
   message?: string;
+  contextLeadId?: number | string;
+  contextContactId?: number | string;
+  droitCommand?: string;
+  mapping?: Record<string, string>;
+  defaults?: Record<string, string>;
+  unmappedToNotes?: string[];
+  skipInvalid?: boolean;
 };
+
+type IncomingAttachment = {
+  originalFileName: string;
+  fileType: string;
+  fileSize: number;
+  fileBuffer: Buffer;
+};
+
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const CHAT_ATTACHMENT_ALLOWED_EXTENSIONS = new Set([".pdf", ".xls", ".xlsx", ".csv"]);
+const CHAT_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+]);
+
+function fileExtension(name: string) {
+  const value = String(name || "").trim().toLowerCase();
+  const index = value.lastIndexOf(".");
+  if (index < 0) return "";
+  return value.slice(index);
+}
+
+function validateAttachmentType(fileName: string, mimeType: string) {
+  const extension = fileExtension(fileName);
+  if (!CHAT_ATTACHMENT_ALLOWED_EXTENSIONS.has(extension)) {
+    return `${fileName || "Attachment"} has an unsupported format. Only PDF, XLS, XLSX, and CSV are allowed.`;
+  }
+  const normalizedMime = String(mimeType || "").trim().toLowerCase();
+  if (!normalizedMime) return "";
+  const genericMime =
+    normalizedMime === "application/octet-stream" ||
+    normalizedMime === "application/zip" ||
+    normalizedMime === "application/x-zip-compressed" ||
+    normalizedMime === "binary/octet-stream";
+  if (genericMime) return "";
+  if (!CHAT_ATTACHMENT_ALLOWED_MIME_TYPES.has(normalizedMime)) {
+    return `${fileName || "Attachment"} has an unsupported file type.`;
+  }
+  return "";
+}
+
+async function parseIncomingRequest(req: NextRequest): Promise<{
+  body: RequestBody;
+  attachments: IncomingAttachment[];
+}> {
+  const contentType = String(req.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    const body: RequestBody = {
+      type: String(formData.get("type") || "").trim() as RequestBody["type"],
+      sessionId: String(formData.get("sessionId") || "").trim() || undefined,
+      message: String(formData.get("message") || "").trim() || undefined,
+      contextLeadId: String(formData.get("contextLeadId") || "").trim() || undefined,
+      contextContactId: String(formData.get("contextContactId") || "").trim() || undefined,
+      droitCommand: String(formData.get("droitCommand") || "").trim() || undefined,
+    };
+    const files = formData
+      .getAll("attachments")
+      .filter((item): item is File => item instanceof File);
+    const attachments: IncomingAttachment[] = [];
+    for (const file of files) {
+      const originalFileName = String(file.name || "").trim();
+      if (!originalFileName) {
+        throw new Error("Attachment file name is required.");
+      }
+      if (!Number.isFinite(file.size) || file.size <= 0) {
+        throw new Error(`${originalFileName} is empty or unreadable.`);
+      }
+      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+        throw new Error(`${originalFileName} exceeds the 10 MB file size limit.`);
+      }
+      const typeError = validateAttachmentType(originalFileName, String(file.type || ""));
+      if (typeError) throw new Error(typeError);
+      const fileBuffer = Buffer.from(await file.arrayBuffer());
+      if (!fileBuffer.length) {
+        throw new Error(`${originalFileName} is empty or unreadable.`);
+      }
+      attachments.push({
+        originalFileName,
+        fileType: String(file.type || "application/octet-stream"),
+        fileSize: fileBuffer.length,
+        fileBuffer,
+      });
+    }
+    return { body, attachments };
+  }
+
+  const body = (await req.json()) as RequestBody;
+  return { body, attachments: [] };
+}
 
 type PendingActivityDraft = {
   lead_id?: string;
@@ -264,15 +385,28 @@ async function withConversationLock<T>(
   }
 }
 
-function publicRole(roleId: number) {
-  return roleId === 1 ? "manager" : "sales_executive";
+function publicRole(roleId: number, roleName?: string) {
+  const normalized = String(roleName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (normalized === "manager") return "manager";
+  if (normalized === "admin") return "admin";
+  if (normalized === "sales_executive") return "sales_executive";
+
+  if (roleId === 1) return "manager";
+  if (roleId === 3) return "admin";
+  return "sales_executive";
 }
 
 function serializedMessages(conversation: StoredConversation) {
   return conversation.messages.map((message) => ({
+    message_id: message.messageId,
     role: message.role,
     content: message.content,
     tool_calls: message.toolCalls,
+    attachments: message.attachments,
   }));
 }
 
@@ -282,7 +416,7 @@ async function conversationPayload(
 ) {
   return {
     session_id: conversation.id,
-    user: { name: user.userName, role: publicRole(user.roleId) },
+    user: { name: user.userName, role: publicRole(user.roleId, user.roleName) },
     messages: serializedMessages(conversation),
     conversations: await listConversations(user),
     confirmation_required: conversation.pendingWrites.length > 0,
@@ -320,7 +454,7 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ detail: "No logged-in user found." }, { status: 401 });
   }
-  if (![1, 2].includes(user.roleId)) {
+  if (![1, 2, 3].includes(user.roleId)) {
     return NextResponse.json(
       { detail: "Your role is not enabled for the CRM assistant." },
       { status: 403 },
@@ -328,10 +462,16 @@ export async function POST(req: NextRequest) {
   }
 
   let body: RequestBody;
+  let attachments: IncomingAttachment[] = [];
   try {
-    body = (await req.json()) as RequestBody;
-  } catch {
-    return NextResponse.json({ detail: "Invalid JSON request." }, { status: 400 });
+    const parsed = await parseIncomingRequest(req);
+    body = parsed.body;
+    attachments = parsed.attachments;
+  } catch (error) {
+    return NextResponse.json(
+      { detail: error instanceof Error ? error.message : "Invalid request payload." },
+      { status: 400 },
+    );
   }
 
   try {
@@ -360,9 +500,18 @@ export async function POST(req: NextRequest) {
     if (
       body.type !== "chat" &&
       body.type !== "confirm_write" &&
-      body.type !== "reject_write"
+      body.type !== "reject_write" &&
+      body.type !== "lead_import_confirm" &&
+      body.type !== "lead_import_cancel" &&
+      body.type !== "lead_import_update"
     ) {
       return NextResponse.json({ detail: "Invalid request type." }, { status: 400 });
+    }
+    if (body.type !== "chat" && attachments.length > 0) {
+      return NextResponse.json(
+        { detail: "Attachments are supported only for chat messages." },
+        { status: 400 },
+      );
     }
 
     const message =
@@ -371,17 +520,199 @@ export async function POST(req: NextRequest) {
         : body.type === "reject_write"
           ? "Rejected"
           : String(body.message || "").trim();
-    if (body.type === "chat" && !message) {
-      return NextResponse.json({ detail: "message is required." }, { status: 400 });
+    if (body.type === "chat" && !message && attachments.length === 0) {
+      return NextResponse.json(
+        { detail: "message or at least one valid attachment is required." },
+        { status: 400 },
+      );
     }
     const conversationId = String(body.sessionId || "").trim();
     if (!conversationId) {
       return NextResponse.json({ detail: "sessionId is required." }, { status: 400 });
     }
 
+    const assistantQuestion = message || "Please analyze the attached files.";
+    let parsedAttachments = {
+      processed: [] as Awaited<ReturnType<typeof processAttachmentsForAssistant>>["processed"],
+      failed: [] as Array<{ fileName: string; reason: string }>,
+    };
+    if (attachments.length) {
+      try {
+        parsedAttachments = await processAttachmentsForAssistant({
+          attachments: attachments.map((attachment) => ({
+            fileName: attachment.originalFileName,
+            fileType: attachment.fileType,
+            fileSize: attachment.fileSize,
+            fileBuffer: attachment.fileBuffer,
+          })),
+          question: assistantQuestion,
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Unknown parsing error";
+        parsedAttachments = {
+          processed: [],
+          failed: attachments.map((attachment) => ({
+            fileName: attachment.originalFileName,
+            reason,
+          })),
+        };
+      }
+    }
+
+    if (attachments.length && parsedAttachments.processed.length === 0 && parsedAttachments.failed.length > 0) {
+      const detail = parsedAttachments.failed
+        .map((item) =>
+          /\.(xls|xlsx)$/i.test(item.fileName)
+            ? `${item.fileName}: I couldn't read this Excel file. Please make sure it is a valid .xls or .xlsx file.`
+            : `${item.fileName}: ${item.reason}`,
+        )
+        .join(" ");
+      return NextResponse.json({ detail }, { status: 400 });
+    }
+
+    const documentContext = buildAttachmentContextMessage({
+      question: assistantQuestion,
+      processed: parsedAttachments.processed,
+      failed: parsedAttachments.failed,
+    });
+
+    const directAttachmentAnswer = tryBuildDirectAttachmentAnswer({
+      question: assistantQuestion,
+      processed: parsedAttachments.processed,
+    });
+
+    const messageForAssistant = documentContext
+      ? `${assistantQuestion}${documentContext}`
+      : assistantQuestion;
+    const userMessageForStorage = message || "Sent attachment(s)";
+
     return await withConversationLock(conversationId, async () => {
       const conversation = await requireConversation(user, conversationId);
       const history = agentHistory(conversation.messages);
+
+      const spreadsheetAttachment = attachments.find((file) =>
+        /\.(xlsx|xls|csv)$/i.test(file.originalFileName),
+      );
+      const importIntent =
+        body.type === "lead_import_confirm" ||
+        body.type === "lead_import_cancel" ||
+        body.type === "lead_import_update" ||
+        (body.type === "chat" && (isLeadImportIntent(assistantQuestion) || Boolean(getPendingLeadImport(conversationId))));
+
+      if (importIntent && !conversation.pendingWrites.length) {
+        if (body.type === "lead_import_cancel" || (body.type === "chat" && /^(cancel|stop|never mind)/i.test(message))) {
+          clearPendingLeadImport(conversationId);
+          const reply = "Lead import cancelled. No CRM records were created.";
+          await saveExchange({
+            user,
+            conversationId,
+            userMessage: userMessageForStorage,
+            assistantReply: reply,
+            toolCalls: [],
+            pendingWrites: [],
+            userAttachments: attachments,
+          });
+          return NextResponse.json({
+            session_id: conversationId,
+            reply,
+            tool_calls: [],
+            conversations: await listConversations(user),
+            confirmation_required: false,
+          });
+        }
+
+        if (body.type === "lead_import_confirm" || (body.type === "chat" && /^(confirm|create leads|yes,? create)/i.test(message) && getPendingLeadImport(conversationId))) {
+          if (!user.companyId) {
+            return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+          }
+          const card = await confirmLeadImport(conversationId, user.companyId);
+          const reply = importReply(card);
+          await saveExchange({
+            user,
+            conversationId,
+            userMessage: userMessageForStorage,
+            assistantReply: reply,
+            toolCalls: [],
+            pendingWrites: [],
+            userAttachments: attachments,
+          });
+          return NextResponse.json({
+            session_id: conversationId,
+            reply,
+            lead_import: card,
+            tool_calls: [],
+            conversations: await listConversations(user),
+            confirmation_required: false,
+          });
+        }
+
+        if (body.type === "lead_import_update" && getPendingLeadImport(conversationId)) {
+          applyLeadImportUpdate(conversationId, {
+            mapping: body.mapping as Record<string, AcarshField> | undefined,
+            defaults: body.defaults,
+            unmappedToNotes: body.unmappedToNotes,
+            skipInvalid: body.skipInvalid,
+          });
+        } else if (body.type === "chat" && getPendingLeadImport(conversationId)) {
+          applyImportMessage(conversationId, assistantQuestion);
+        }
+
+        let card = getPendingLeadImport(conversationId)
+          ? await previewPendingLeadImport(conversationId)
+          : null;
+        if (!card && spreadsheetAttachment) {
+          card = await startLeadImport({
+            conversationId,
+            fileName: spreadsheetAttachment.originalFileName,
+            fileBuffer: spreadsheetAttachment.fileBuffer,
+            ownerName: user.userName,
+          });
+        }
+        if (!card) {
+          return NextResponse.json(
+            { detail: "Attach an Excel or CSV file to import leads." },
+            { status: 400 },
+          );
+        }
+        const reply = importReply(card);
+        await saveExchange({
+          user,
+          conversationId,
+          userMessage: userMessageForStorage,
+          assistantReply: reply,
+          toolCalls: [],
+          pendingWrites: conversation.pendingWrites,
+          userAttachments: attachments,
+        });
+        return NextResponse.json({
+          session_id: conversationId,
+          reply,
+          lead_import: card,
+          tool_calls: [],
+          conversations: await listConversations(user),
+          confirmation_required: false,
+        });
+      }
+
+      if (body.type === "chat" && directAttachmentAnswer && !conversation.pendingWrites.length) {
+        setPendingActivityDraft(conversationId, null);
+        await saveExchange({
+          user,
+          conversationId,
+          userMessage: userMessageForStorage,
+          assistantReply: directAttachmentAnswer.reply,
+          toolCalls: [],
+          pendingWrites: conversation.pendingWrites,
+          userAttachments: attachments,
+        });
+        return NextResponse.json({
+          session_id: conversationId,
+          reply: directAttachmentAnswer.reply,
+          tool_calls: [],
+          conversations: await listConversations(user),
+          confirmation_required: false,
+        });
+      }
 
       const pendingActivity = getPendingActivityDraft(conversationId);
 
@@ -392,10 +723,11 @@ export async function POST(req: NextRequest) {
           await saveExchange({
             user,
             conversationId,
-            userMessage: message,
+            userMessage: userMessageForStorage,
             assistantReply: reply,
             toolCalls: [],
             pendingWrites: conversation.pendingWrites,
+            userAttachments: attachments,
           });
           return NextResponse.json({
             session_id: conversationId,
@@ -414,10 +746,11 @@ export async function POST(req: NextRequest) {
             await saveExchange({
               user,
               conversationId,
-              userMessage: message,
+              userMessage: userMessageForStorage,
               assistantReply: followUp,
               toolCalls: [],
               pendingWrites: conversation.pendingWrites,
+              userAttachments: attachments,
             });
             return NextResponse.json({
               session_id: conversationId,
@@ -437,10 +770,11 @@ export async function POST(req: NextRequest) {
             await saveExchange({
               user,
               conversationId,
-              userMessage: message,
+              userMessage: userMessageForStorage,
               assistantReply: question,
               toolCalls: [],
               pendingWrites: conversation.pendingWrites,
+              userAttachments: attachments,
             });
             return NextResponse.json({
               session_id: conversationId,
@@ -457,10 +791,11 @@ export async function POST(req: NextRequest) {
             await saveExchange({
               user,
               conversationId,
-              userMessage: message,
+              userMessage: userMessageForStorage,
               assistantReply: reply,
               toolCalls: [],
               pendingWrites: conversation.pendingWrites,
+              userAttachments: attachments,
             });
             return NextResponse.json({
               session_id: conversationId,
@@ -476,10 +811,11 @@ export async function POST(req: NextRequest) {
           await saveExchange({
             user,
             conversationId,
-            userMessage: message,
+            userMessage: userMessageForStorage,
             assistantReply: reply,
             toolCalls: [],
             pendingWrites: conversation.pendingWrites,
+            userAttachments: attachments,
           });
           return NextResponse.json({
             session_id: conversationId,
@@ -500,10 +836,11 @@ export async function POST(req: NextRequest) {
         await saveExchange({
           user,
           conversationId,
-          userMessage: message,
+          userMessage: userMessageForStorage,
           assistantReply: reply,
           toolCalls: [],
           pendingWrites: [],
+          userAttachments: attachments,
         });
         return NextResponse.json({
           session_id: conversationId,
@@ -527,10 +864,11 @@ export async function POST(req: NextRequest) {
         await saveExchange({
           user,
           conversationId,
-          userMessage: message,
+          userMessage: userMessageForStorage,
           assistantReply: result.reply,
           toolCalls: result.toolCalls,
           pendingWrites: [],
+          userAttachments: attachments,
         });
         return NextResponse.json({
           session_id: conversationId,
@@ -568,16 +906,46 @@ export async function POST(req: NextRequest) {
       const previousContext = useCrossConversationContext
         ? await getPreviousConversationContext(user, conversationId)
         : "";
-      const result = await runAgent(user, history, message, previousContext);
+      const parsedLeadId = Number(body.contextLeadId);
+      const parsedContactId = Number(body.contextContactId);
+      const researchKind =
+        body.droitCommand === "research_contact"
+          ? "contact"
+          : body.droitCommand === "research_company"
+            ? "company"
+            : body.droitCommand === "meeting_brief"
+              ? "meeting"
+              : undefined;
+      const pageContext: AssistantPageContext | undefined =
+        (Number.isInteger(parsedLeadId) && parsedLeadId > 0) ||
+        (Number.isInteger(parsedContactId) && parsedContactId > 0) ||
+        researchKind
+          ? {
+              leadId: Number.isInteger(parsedLeadId) && parsedLeadId > 0 ? parsedLeadId : undefined,
+              contactId:
+                Number.isInteger(parsedContactId) && parsedContactId > 0
+                  ? parsedContactId
+                  : undefined,
+              researchKind,
+            }
+          : undefined;
+      const result = await runAgent(
+        user,
+        history,
+        messageForAssistant,
+        previousContext,
+        pageContext,
+      );
       const pendingWrites = result.pendingWrites || [];
       setPendingActivityDraft(conversationId, null);
       await saveExchange({
         user,
         conversationId,
-        userMessage: message,
+        userMessage: userMessageForStorage,
         assistantReply: result.reply,
         toolCalls: result.toolCalls,
         pendingWrites,
+        userAttachments: attachments,
       });
       return NextResponse.json({
         session_id: conversationId,

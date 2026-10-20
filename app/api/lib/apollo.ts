@@ -16,9 +16,6 @@ type ApolloPeopleMatchInput = {
   companyDomain?: string;
   revealPhoneNumber?: boolean;
   revealPersonalEmails?: boolean;
-  webhookUrl?: string;
-  phonePollTimeoutMs?: number;
-  phonePollIntervalMs?: number;
 };
 
 export type ApolloPersonCandidate = {
@@ -42,10 +39,12 @@ export type ApolloEnrichedPerson = ApolloPersonCandidate & {
 export class ApolloServiceError extends Error {
   statusCode: number;
   userMessage: string;
-  constructor(statusCode: number, userMessage: string) {
+  meta?: Record<string, unknown>;
+  constructor(statusCode: number, userMessage: string, meta?: Record<string, unknown>) {
     super(userMessage);
     this.statusCode = statusCode;
     this.userMessage = userMessage;
+    this.meta = meta;
     this.name = "ApolloServiceError";
   }
 }
@@ -83,7 +82,7 @@ function joinLocation(...parts: unknown[]) {
 }
 
 function mapPerson(raw: any): ApolloPersonCandidate | null {
-  const apolloPersonId = stringOrNull(raw?.id || raw?.person_id);
+  const apolloPersonId = stringOrNull(raw?.person_id || raw?.id);
   if (!apolloPersonId) return null;
 
   const org = raw?.organization || raw?.account || null;
@@ -147,11 +146,34 @@ async function parseJson(response: Response) {
   }
 }
 
-function mapApolloFailure(status: number) {
+function mapApolloFailure(status: number, responseBody?: any, path?: string) {
+  const apolloMessage =
+    stringOrNull(responseBody?.error) ||
+    stringOrNull(responseBody?.message) ||
+    stringOrNull(responseBody?.detail) ||
+    stringOrNull(responseBody?.errors?.[0]?.message);
+
+  if (process.env.NODE_ENV !== "production") {
+    console.warn("[apollo] request failed", {
+      path,
+      status,
+      apolloMessage,
+      responseKeys: responseBody && typeof responseBody === "object" ? Object.keys(responseBody) : [],
+    });
+  }
+
   if (status === 401) return new ApolloServiceError(401, "Invalid Apollo API key.");
   if (status === 403) return new ApolloServiceError(403, "Apollo permission denied.");
   if (status === 429) return new ApolloServiceError(429, "Apollo rate limit reached.");
-  return new ApolloServiceError(status >= 400 ? status : 502, "Apollo request failed.");
+  return new ApolloServiceError(
+    status >= 400 ? status : 502,
+    apolloMessage ? `Apollo request failed: ${apolloMessage}` : "Apollo request failed.",
+    {
+      path,
+      status,
+      apolloMessage,
+    }
+  );
 }
 
 async function apolloRequest(
@@ -175,7 +197,7 @@ async function apolloRequest(
   });
 
   const payload = await parseJson(response);
-  if (!response.ok) throw mapApolloFailure(response.status);
+  if (!response.ok) throw mapApolloFailure(response.status, payload, path);
   return payload;
 }
 
@@ -208,12 +230,8 @@ export async function searchApolloPeople(input: ApolloSearchInput): Promise<Apol
     .filter((v: ApolloPersonCandidate | null): v is ApolloPersonCandidate => Boolean(v));
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function enrichApolloPerson(input: ApolloPeopleMatchInput): Promise<ApolloEnrichedPerson | null> {
-  const revealPhoneNumber = input.revealPhoneNumber ?? true;
+  const revealPhoneNumber = input.revealPhoneNumber ?? false;
   const revealPersonalEmails = input.revealPersonalEmails ?? false;
 
   const payload = compactObject({
@@ -226,12 +244,6 @@ export async function enrichApolloPerson(input: ApolloPeopleMatchInput): Promise
     domain: input.companyDomain,
     reveal_personal_emails: revealPersonalEmails,
     reveal_phone_number: revealPhoneNumber,
-    webhook_url:
-      revealPhoneNumber
-        ? stringOrNull(input.webhookUrl) ||
-          stringOrNull(process.env.APOLLO_WEBHOOK_URL) ||
-          "https://example.com/apollo-webhook"
-        : undefined,
   });
 
   const response = await apolloRequest("/api/v1/people/match", {
@@ -249,43 +261,11 @@ export async function enrichApolloPerson(input: ApolloPeopleMatchInput): Promise
     stringOrNull(person?.request_id);
 
   let phone = mapped.phone;
-  let phoneStatus: ApolloEnrichedPerson["phoneStatus"] = revealPhoneNumber
-    ? phone
-      ? "found"
-      : "unavailable"
-    : "not_requested";
-
-  if (revealPhoneNumber && !phone && requestId) {
-    const timeoutMs = Math.max(5000, Number(input.phonePollTimeoutMs || 25000));
-    const intervalMs = Math.max(1000, Number(input.phonePollIntervalMs || 2000));
-    const start = Date.now();
-
-    while (Date.now() - start < timeoutMs) {
-      await sleep(intervalMs);
-      const poll = await apolloRequest(`/api/v1/webhook_result/${encodeURIComponent(requestId)}`, {
-        method: "GET",
-      });
-
-      const pollPerson = poll?.person || poll?.data?.person || poll;
-      phone = extractPhone(pollPerson) || extractPhone(poll) || phone;
-
-      if (phone) {
-        phoneStatus = "found";
-        break;
-      }
-
-      const noPhone =
-        String(poll?.phone_status || "").toLowerCase() === "unavailable" ||
-        String(poll?.result || "").toLowerCase() === "no_phone" ||
-        String(poll?.status || "").toLowerCase() === "completed";
-      if (noPhone) {
-        phoneStatus = "unavailable";
-        break;
-      }
-    }
-
-    if (!phone && phoneStatus !== "unavailable") phoneStatus = "timeout";
-  }
+  const phoneStatus: ApolloEnrichedPerson["phoneStatus"] = phone
+    ? "found"
+    : revealPhoneNumber
+      ? "unavailable"
+      : "not_requested";
 
   return {
     ...mapped,
@@ -301,7 +281,7 @@ export async function enrichApolloPerson(input: ApolloPeopleMatchInput): Promise
 
 export function toApolloErrorResponse(error: unknown) {
   if (error instanceof ApolloServiceError) {
-    return { status: error.statusCode, message: error.userMessage };
+    return { status: error.statusCode, message: error.userMessage, meta: error.meta };
   }
   return { status: 502, message: "Unable to fetch Apollo data right now." };
 }

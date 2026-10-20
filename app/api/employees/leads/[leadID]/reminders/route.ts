@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
 
 function parseReminderDateToUtc(input: unknown): Date | null {
   if (typeof input !== "string") return null;
@@ -61,11 +63,21 @@ export async function POST(
     }
 
     const pool = await getPool();
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const companyId = resolveWriteCompanyId(
+      authUser.companyId,
+      await loadRecordCompanyId(pool, "lead", leadId)
+    );
+
     const [insertResult]: any = await pool.execute(
       `
       INSERT INTO LeadReminders
       (
         LeadId,
+        CompanyId,
         ReminderDate,
         ReminderNote,
         Status,
@@ -75,10 +87,11 @@ export async function POST(
         EmailSent,
         EmailProcessing
       )
-      VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
       `,
       [
         leadId,
+        companyId,
         reminderDateUtc,
         String(Notes).trim(),
         String(Status || "Pending"),
@@ -97,8 +110,9 @@ export async function POST(
         NotificationChannels
       FROM LeadReminders
       WHERE ReminderId = ?
+        AND CompanyId = ?
       `,
-      [insertResult.insertId]
+      [insertResult.insertId, companyId]
     );
 
     return NextResponse.json({
@@ -143,6 +157,16 @@ export async function PUT(
     }
 
     const pool = await getPool();
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const companyId = resolveWriteCompanyId(
+      authUser.companyId,
+      await loadRecordCompanyId(pool, "lead", leadId)
+    );
+
     const [result]: any = await pool.execute(
       `
       UPDATE LeadReminders
@@ -157,6 +181,7 @@ export async function PUT(
         END
       WHERE ReminderId = ?
         AND LeadId = ?
+        AND CompanyId = ?
       `,
       [
         reminderDateUtc,
@@ -166,6 +191,7 @@ export async function PUT(
         String(Status || "Pending"),
         Number(ReminderId),
         leadId,
+        companyId,
       ]
     );
 

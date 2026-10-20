@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 import {
   buildLeadOwnerVisibilityClause,
   hasGlobalLeadAccess,
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
     if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const companyId = requireCompanyId(authUser);
 
     const pool = await getPool();
     const hasGlobalAccess = hasGlobalLeadAccess(authUser.roleId);
@@ -87,8 +89,8 @@ export async function GET(req: NextRequest) {
     const pageSize = Math.min(100, Math.max(1, Number(query.get("pageSize") ?? 20)));
     const offset = (page - 1) * pageSize;
 
-    const whereClauses: string[] = ["la.ActivityDate BETWEEN ? AND ?"];
-    const baseParams: (string | number | Date)[] = [fromDate, toDate];
+    const whereClauses: string[] = ["la.ActivityDate BETWEEN ? AND ?", "l.CompanyId = ?"];
+    const baseParams: (string | number | Date)[] = [fromDate, toDate, companyId];
     const effectiveUserId = hasGlobalAccess ? requestedUserId : null;
 
     if (requestedSourceRaw === "leads") {
@@ -193,10 +195,14 @@ export async function GET(req: NextRequest) {
     const [userRows]: any = await pool.query(
       hasGlobalAccess
         ? `
-          SELECT DISTINCT UserId, UserName
-          FROM Users
-          WHERE UserName IS NOT NULL
-          ORDER BY UserName
+          SELECT DISTINCT u.UserId, u.UserName
+          FROM Users u
+          INNER JOIN CompanyUsers cu
+            ON cu.UserId = u.UserId
+           AND cu.CompanyId = ?
+           AND cu.IsActive = 1
+          WHERE u.UserName IS NOT NULL
+          ORDER BY u.UserName
         `
         : `
           SELECT UserId, UserName
@@ -204,7 +210,7 @@ export async function GET(req: NextRequest) {
           WHERE UserId = ?
           LIMIT 1
         `,
-      hasGlobalAccess ? [] : [authUser.userId]
+      hasGlobalAccess ? [companyId] : [authUser.userId]
     );
 
     const users = (userRows ?? []).map((u: any) => ({
@@ -231,6 +237,9 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     console.error("Reports API error:", error);
     return NextResponse.json(
       { error: "Failed to fetch reports" },

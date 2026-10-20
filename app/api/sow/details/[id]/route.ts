@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 
 async function getTableColumns(poolOrConn: any, tableName: string): Promise<Set<string>> {
   const [rows]: any = await poolOrConn.query(
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const sowId = Number(params.id);
     if (!sowId || Number.isNaN(sowId)) {
@@ -70,9 +72,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       FROM SOWMaster s
       WHERE s.SOWId = ?
         ${mHas("IsActive") ? "AND s.IsActive = 1" : ""}
+        ${mHas("CompanyId") ? "AND s.CompanyId = ?" : ""}
       LIMIT 1
       `,
-      [sowId]
+      mHas("CompanyId") ? [sowId, companyId] : [sowId]
     );
 
     const master = masterRows?.[0];
@@ -175,6 +178,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       Positions: positions,
     });
   } catch (error: any) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     return NextResponse.json({ error: error?.message || "Failed to fetch SOW details" }, { status: 500 });
   }
 }
@@ -184,6 +190,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const sowId = Number(params.id);
     if (!sowId || Number.isNaN(sowId)) {
@@ -210,8 +217,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     await conn.beginTransaction();
 
     const [existingRows]: any = await conn.query(
-      `SELECT SOWId FROM SOWMaster WHERE SOWId = ? ${mHas("IsActive") ? "AND IsActive = 1" : ""} LIMIT 1`,
-      [sowId]
+      `SELECT SOWId FROM SOWMaster WHERE SOWId = ? ${mHas("IsActive") ? "AND IsActive = 1" : ""} ${mHas("CompanyId") ? "AND CompanyId = ?" : ""} LIMIT 1`,
+      mHas("CompanyId") ? [sowId, companyId] : [sowId]
     );
     if (!existingRows?.length) {
       await conn.rollback();
@@ -314,6 +321,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
               "SOWId",
               pHas("PositionNumber") ? "PositionNumber" : null,
               pHas("Role") ? "Role" : null,
+              pHas("CompanyId") ? "CompanyId" : null,
               pHas("StartDate") ? "StartDate" : null,
               pHas("EndDate") ? "EndDate" : null,
               pHas("IsActive") ? "IsActive" : null,
@@ -325,6 +333,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             "?",
             ...(pHas("PositionNumber") ? ["?"] : []),
             ...(pHas("Role") ? ["?"] : []),
+            ...(pHas("CompanyId") ? ["?"] : []),
             ...(pHas("StartDate") ? ["?"] : []),
             ...(pHas("EndDate") ? ["?"] : []),
             ...(pHas("IsActive") ? ["1"] : []),
@@ -334,6 +343,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             sowId,
             ...(pHas("PositionNumber") ? [Number(position?.PositionNumber || index + 1)] : []),
             ...(pHas("Role") ? [String(position?.Role || "").trim() || null] : []),
+            ...(pHas("CompanyId") ? [companyId] : []),
             ...(pHas("StartDate") ? [position?.StartDate ?? null] : []),
             ...(pHas("EndDate") ? [position?.EndDate ?? null] : []),
           ]
@@ -423,6 +433,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             INSERT INTO SOWPositionResource (
               ${[
                 "SOWPositionId",
+                rHas("CompanyId") ? "CompanyId" : null,
                 rHas("Resource") ? "Resource" : null,
                 rHas("ResourceId") ? "ResourceId" : null,
                 rHas("Location") ? "Location" : null,
@@ -445,6 +456,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             )
             VALUES (${[
               "?",
+              ...(rHas("CompanyId") ? ["?"] : []),
               ...(rHas("Resource") ? ["?"] : []),
               ...(rHas("ResourceId") ? ["?"] : []),
               ...(rHas("Location") ? ["?"] : []),
@@ -463,7 +475,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
               ...(rHas("EndReason") ? ["?"] : []),
             ].join(", ")})
             `,
-            updateArgs
+            rHas("CompanyId") ? [finalPositionId, companyId, ...updateArgs.slice(1)] : updateArgs
           );
           retainedResourceIds.add(Number(insertResource.insertId));
         }
@@ -550,6 +562,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       try {
         await conn.rollback();
       } catch {}
+    }
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
     }
     return NextResponse.json({ error: error?.message || "Failed to update SOW details" }, { status: 500 });
   } finally {

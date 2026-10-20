@@ -81,6 +81,7 @@ LLM/tool-selection layer:
 | --- | --- | --- |
 | Manager (`RoleId=1`) | Organization-wide CRM records | Any accessible CRM record; may assign owners |
 | Sales Executive (`RoleId=2`) | Owned leads and descendants; own/owned activities and reminders; own user row | Owned leads and descendants only; new leads are self-owned and cannot be reassigned |
+| Admin (`RoleId=3`) | Same organization-wide scope as Manager | Same write scope as Manager |
 
 Lookup catalogs are shared because they contain controlled values rather than CRM
 business records. Unsupported roles are rejected by the chatbot and MCP boundary.

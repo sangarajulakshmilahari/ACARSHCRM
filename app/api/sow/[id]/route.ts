@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 
 async function getTableColumns(pool: any, tableName: string): Promise<Set<string>> {
   const [rows]: any = await pool.query(
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const projectId = Number(params.id);
     if (!projectId || Number.isNaN(projectId)) {
@@ -52,13 +54,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         ${has("VersionNo") ? "s.VersionNo" : "1 AS VersionNo"},
         ${has("Status") ? "s.Status" : "NULL AS Status"}
       FROM SOWMaster s
+      INNER JOIN Projects p
+        ON p.ProjectId = s.ProjectId
+       AND p.CompanyId = ?
       WHERE s.ProjectId = ?
+        ${has("CompanyId") ? "AND s.CompanyId = ?" : ""}
         ${has("IsActive") ? "AND s.IsActive = 1" : ""}
         ${has("IsCurrent") ? "AND s.IsCurrent = 1" : ""}
       ORDER BY ${has("VersionNo") ? "s.VersionNo DESC" : "s.SOWId DESC"}
       LIMIT 1
       `,
-      [projectId]
+      has("CompanyId") ? [companyId, projectId, companyId] : [companyId, projectId]
     );
 
     if (!rows?.length) {
@@ -87,6 +93,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       },
     });
   } catch (error: any) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     return NextResponse.json({ error: error?.message || "Failed to fetch SOW" }, { status: 500 });
   }
 }
@@ -95,6 +104,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const sowId = Number(params.id);
     if (!sowId || Number.isNaN(sowId)) {
@@ -122,8 +132,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       SET Status = COALESCE(?, Status),
           IsActive = COALESCE(?, IsActive)
       WHERE SOWId = ?
+        AND CompanyId = ?
       `,
-      [status, isActive, sowId]
+      [status, isActive, sowId, companyId]
     );
 
     const [rows]: any = await pool.query(
@@ -147,13 +158,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         IsActive
       FROM SOWMaster
       WHERE SOWId = ?
+        AND CompanyId = ?
       LIMIT 1
       `,
-      [sowId]
+      [sowId, companyId]
     );
 
     return NextResponse.json(rows?.[0] || null);
   } catch (error: any) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     return NextResponse.json({ error: error?.message || "Failed to update SOW" }, { status: 500 });
   }
 }
@@ -163,6 +178,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const sowId = Number(params.id);
     if (!sowId || Number.isNaN(sowId)) {
@@ -175,8 +191,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     await conn.beginTransaction();
 
     const [targetRows]: any = await conn.query(
-      `SELECT SOWId, ProjectId, IsCurrent, VersionNo FROM SOWMaster WHERE SOWId = ? LIMIT 1`,
-      [sowId]
+      `SELECT SOWId, ProjectId, IsCurrent, VersionNo FROM SOWMaster WHERE SOWId = ? AND CompanyId = ? LIMIT 1`,
+      [sowId, companyId]
     );
     const target = targetRows?.[0];
     if (!target) {
@@ -191,8 +207,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
           IsCurrent = 0,
           Status = 'Deleted'
       WHERE SOWId = ?
+        AND CompanyId = ?
       `,
-      [sowId]
+      [sowId, companyId]
     );
 
     if (Number(target.IsCurrent || 0) === 1) {
@@ -201,18 +218,19 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         SELECT SOWId
         FROM SOWMaster
         WHERE ProjectId = ?
+          AND CompanyId = ?
           AND IsActive = 1
           AND SOWId <> ?
         ORDER BY VersionNo DESC
         LIMIT 1
         `,
-        [target.ProjectId, sowId]
+        [target.ProjectId, companyId, sowId]
       );
       const fallback = fallbackRows?.[0];
       if (fallback?.SOWId) {
         await conn.query(
-          `UPDATE SOWMaster SET IsCurrent = 1, Status = 'Active' WHERE SOWId = ?`,
-          [fallback.SOWId]
+          `UPDATE SOWMaster SET IsCurrent = 1, Status = 'Active' WHERE SOWId = ? AND CompanyId = ?`,
+          [fallback.SOWId, companyId]
         );
       }
     }
@@ -224,6 +242,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       try {
         await conn.rollback();
       } catch {}
+    }
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
     }
     return NextResponse.json({ error: error?.message || "Failed to delete SOW" }, { status: 500 });
   } finally {

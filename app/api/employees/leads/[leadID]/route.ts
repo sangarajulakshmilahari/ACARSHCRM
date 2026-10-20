@@ -1,5 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
+import {
+  backfillLeadScoresOnce,
+  calculateAndStoreLeadScore,
+  ensureLeadScoresTable,
+} from "@/app/api/lib/lead-scoring";
+import { setLeadArchived } from "@/app/api/lib/lead-archive";
+
+const deps = {
+  getPool,
+  getAuthUser,
+  canUserViewLeadById,
+};
+
+function parseScoreBreakdown(raw: unknown): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw as Record<string, any>;
+  if (typeof raw !== "string") return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
 
 
 //  GET LEAD DETAILS
@@ -9,18 +35,30 @@ export async function GET(
   { params }: { params: { leadID: string } }
 ) {
   try {
+    const authUser = await deps.getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const leadId = Number(params.leadID);
     if (isNaN(leadId)) {
       return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
     }
 
-    const pool = await getPool();
+    const pool = await deps.getPool();
+    const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const conn = await pool.getConnection();
 
     try {
+      await ensureLeadScoresTable(conn);
+      await backfillLeadScoresOnce(conn);
+
       /* 1. Lead Basic Details */
-      const [leadRows]: any = await conn.query(
-        `
+      const leadDetailsQuery = `
         SELECT
   l.LeadId,
   l.CompanyName,
@@ -28,14 +66,19 @@ export async function GET(
   l.LeadSource,
   DATE_FORMAT(l.LeadDate, '%Y-%m-%d') AS LeadDate,
   l.LeadNotes,
+  lscr.Score AS LeadScore,
+  lscr.Rating AS LeadScoreRating,
+  lscr.Breakdown AS LeadScoreBreakdown,
   latestStatus.StatusName,
   l.AccountTypeId,
-  at.Name AS AccountTypeName,     -- ✅ ADD THIS
+  at.Name AS AccountTypeName,
   u.UserName AS OwnerName
 FROM Leads l
 LEFT JOIN Users u ON l.OwnerId = u.UserId
-LEFT JOIN AccountTypes at        -- ✅ ADD THIS
+LEFT JOIN AccountTypes at
   ON l.AccountTypeId = at.AccountTypeId
+LEFT JOIN LeadScores lscr
+  ON lscr.LeadId = l.LeadId
 LEFT JOIN (
   SELECT la1.LeadId, ls1.StatusName
   FROM LeadActivities la1
@@ -47,10 +90,21 @@ LEFT JOIN (
   ) la2 ON la1.LeadId = la2.LeadId AND la1.ActivityDate = la2.MaxActivityDate
 ) latestStatus ON latestStatus.LeadId = l.LeadId
 WHERE l.LeadId = ?
+      `;
 
-        `,
+      let [leadRows]: any = await conn.query(
+        leadDetailsQuery,
         [leadId]
       );
+
+      if (Array.isArray(leadRows) && leadRows[0] && leadRows[0].LeadScore == null) {
+        try {
+          await calculateAndStoreLeadScore(conn, leadId);
+          [leadRows] = await conn.query(leadDetailsQuery, [leadId]);
+        } catch (error) {
+          console.error(`[lead-scoring] on-demand calculate failed for lead ${leadId}:`, error);
+        }
+      }
 
       if (!leadRows.length) {
         return NextResponse.json({ error: "Lead not found" }, { status: 404 });
@@ -64,6 +118,8 @@ WHERE l.LeadId = ?
           lc.ContactName,
           lc.ContactTitle,
           lc.ContactEmail,
+          lc.ContactPhone,
+          lc.ContactNotes,
           lc.LinkedInProfile,
           lc.LinkedInRequestSent,
           lc.LinkedInRequestAccepted,
@@ -161,6 +217,9 @@ WHERE l.LeadId = ?
 
       return NextResponse.json({
         ...leadRows[0],
+        LeadScore: leadRows[0].LeadScore ?? 0,
+        LeadScoreRating: leadRows[0].LeadScoreRating ?? "COLD",
+        LeadScoreBreakdown: parseScoreBreakdown(leadRows[0].LeadScoreBreakdown),
         Contacts: contacts,
         Activities: activities,
         Reminders: reminders,
@@ -185,6 +244,11 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await deps.getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const leadId = Number(params.leadID);
   if (isNaN(leadId)) {
     return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
@@ -201,7 +265,16 @@ export async function PUT(
     Contacts,
   } = body;
 
-  const pool = await getPool();
+  const pool = await deps.getPool();
+  const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+  if (!hasAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const companyId = resolveWriteCompanyId(
+    authUser.companyId,
+    await loadRecordCompanyId(pool, "lead", leadId)
+  );
+
   const conn = await pool.getConnection();
 
   try {
@@ -228,6 +301,7 @@ export async function PUT(
         LeadNotes = ?,
         OwnerId = ?
       WHERE LeadId = ?
+        AND CompanyId = ?
       `,
       [
         CompanyName || null,
@@ -237,14 +311,15 @@ export async function PUT(
         LeadNotes || null,
         ownerId,
         leadId,
+        companyId,
       ]
     );
 
     /* Contacts: update existing, insert new, delete removed (without breaking FK) */
     if (Array.isArray(Contacts)) {
       const [existingRows]: any = await conn.query(
-        `SELECT LeadContactID FROM LeadContacts WHERE LeadId = ?`,
-        [leadId]
+        `SELECT LeadContactID FROM LeadContacts WHERE LeadId = ? AND CompanyId = ?`,
+        [leadId, companyId]
       );
 
       const existingIds = new Set<number>(
@@ -287,18 +362,20 @@ export async function PUT(
               ContactEmail = ?,
               ContactTitle = ?,
               ContactPhone = ?,
+              ContactNotes = ?,
               ContactRoleId = ?,
               LinkedInProfile = ?,
               LinkedInRequestSent = ?,
               LinkedInRequestAccepted = ?,
               EmailSent = ?
-            WHERE LeadId = ? AND LeadContactID = ?
+            WHERE LeadId = ? AND LeadContactID = ? AND CompanyId = ?
             `,
             [
               c.ContactName || null,
               c.ContactEmail || null,
               c.ContactTitle || null,
               c.ContactPhone || null,
+              c.ContactNotes || null,
               roleId,
               c.LinkedInProfile || null,
               c.LinkedInRequestSent ? 1 : 0,
@@ -306,6 +383,7 @@ export async function PUT(
               c.EmailSent ? 1 : 0,
               leadId,
               maybeContactId,
+              companyId,
             ]
           );
 
@@ -315,16 +393,18 @@ export async function PUT(
         await conn.query(
           `
           INSERT INTO LeadContacts
-            (LeadId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactRoleId,
+            (LeadId, CompanyId, ContactName, ContactEmail, ContactTitle, ContactPhone, ContactNotes, ContactRoleId,
              LinkedInProfile, LinkedInRequestSent, LinkedInRequestAccepted, EmailSent)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             leadId,
+            resolveWriteCompanyId(authUser.companyId, await loadRecordCompanyId(conn, "lead", leadId)),
             c.ContactName || null,
             c.ContactEmail || null,
             c.ContactTitle || null,
             c.ContactPhone || null,
+            c.ContactNotes || null,
             roleId,
             c.LinkedInProfile || null,
             c.LinkedInRequestSent ? 1 : 0,
@@ -345,17 +425,19 @@ export async function PUT(
           `
           UPDATE LeadActivities
           SET ContactId = NULL
-          WHERE LeadId = ? AND ContactId IN (${placeholders})
+          WHERE LeadId = ? AND CompanyId = ? AND ContactId IN (${placeholders})
           `,
-          [leadId, ...deletedContactIds]
+          [leadId, companyId, ...deletedContactIds]
         );
 
         await conn.query(
-          `DELETE FROM LeadContacts WHERE LeadId = ? AND LeadContactID IN (${placeholders})`,
-          [leadId, ...deletedContactIds]
+          `DELETE FROM LeadContacts WHERE LeadId = ? AND CompanyId = ? AND LeadContactID IN (${placeholders})`,
+          [leadId, companyId, ...deletedContactIds]
         );
       }
     }
+
+    await calculateAndStoreLeadScore(conn, leadId);
 
     await conn.commit();
 
@@ -383,28 +465,39 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await deps.getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const leadId = Number(params.leadID);
   if (isNaN(leadId)) {
     return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
   }
 
-  const pool = await getPool();
+  const pool = await deps.getPool();
+  const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+  if (!hasAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const conn = await pool.getConnection();
 
   try {
     await conn.beginTransaction();
 
-    await conn.query(`DELETE FROM LeadContacts WHERE LeadId = ?`, [leadId]);
-    await conn.query(`DELETE FROM LeadActivities WHERE LeadId = ?`, [leadId]);
-    await conn.query(`DELETE FROM LeadReminders WHERE LeadId = ?`, [leadId]);
-    await conn.query(`DELETE FROM Opportunities WHERE LeadId = ?`, [leadId]);
-    await conn.query(`DELETE FROM Leads WHERE LeadId = ?`, [leadId]);
+    const archived = await setLeadArchived(conn, leadId, true);
+    if (!archived) {
+      await conn.rollback();
+      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    }
 
     await conn.commit();
 
     return NextResponse.json({
       success: true,
-      message: "Lead deleted successfully",
+      message: "Lead archived successfully",
+      IsArchived: 1,
     });
   } catch (error: any) {
     await conn.rollback();

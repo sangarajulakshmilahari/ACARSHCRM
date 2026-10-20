@@ -29,11 +29,12 @@ class Settings(BaseSettings):
 
     transport: Literal["stdio", "http", "sse"] = "stdio"
     host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65535)
+    port: int = Field(default=8030, ge=1, le=65535)
     http_path: str = "/mcp"
 
     default_actor_user_id: int | None = Field(default=None, gt=0)
     default_actor_role_id: int | None = Field(default=None, gt=0)
+    default_actor_company_id: int | None = Field(default=None, gt=0)
     internal_token: SecretStr = SecretStr("")
     max_page_size: int = Field(default=100, ge=1, le=500)
     query_timeout_seconds: int = Field(default=15, ge=1, le=120)

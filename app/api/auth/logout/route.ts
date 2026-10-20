@@ -20,6 +20,11 @@ export async function GET() {
     path: "/",
     maxAge: 0,
   });
+  res.cookies.set("acarsh_active_company_id", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
 
   return res;
 }

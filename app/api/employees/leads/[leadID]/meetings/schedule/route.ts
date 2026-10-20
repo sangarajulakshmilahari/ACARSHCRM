@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { resolveAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
 import { getGraphClient } from "@/app/api/lib/graph";
 import { sendMeetingInviteEmail } from "@/app/api/lib/mailer";
+import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
 
 function toDate(input: unknown): Date | null {
   if (typeof input !== "string") return null;
@@ -62,9 +65,18 @@ export async function POST(
 
     const pool = await getPool();
 
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const companyId = resolveWriteCompanyId(
+      authUser.companyId,
+      await loadRecordCompanyId(pool, "lead", leadId)
+    );
+
     const [leadRows]: any = await pool.query(
-      `SELECT LeadId, CompanyName FROM Leads WHERE LeadId = ? LIMIT 1`,
-      [leadId]
+      `SELECT LeadId, CompanyName FROM Leads WHERE LeadId = ? AND CompanyId = ? LIMIT 1`,
+      [leadId, companyId]
     );
 
     if (!leadRows?.length) {
@@ -93,12 +105,13 @@ export async function POST(
         SELECT ContactEmail, ContactName
         FROM LeadContacts
         WHERE LeadId = ?
+          AND CompanyId = ?
           AND ContactEmail IS NOT NULL
           AND TRIM(ContactEmail) <> ''
         ORDER BY LeadContactID DESC
         LIMIT 1
         `,
-        [leadId]
+        [leadId, companyId]
       );
 
       const defaultEmail = String(contactRows?.[0]?.ContactEmail || "").trim();
@@ -129,11 +142,12 @@ export async function POST(
           SELECT LeadContactID
           FROM LeadContacts
           WHERE LeadId = ?
+            AND CompanyId = ?
             AND LOWER(TRIM(ContactEmail)) = LOWER(TRIM(?))
           ORDER BY LeadContactID DESC
           LIMIT 1
           `,
-          [leadId, email]
+          [leadId, companyId, email]
         );
 
         const contactId = Number(contactRows?.[0]?.LeadContactID) || null;
@@ -234,11 +248,13 @@ export async function POST(
     const [insertActivity]: any = await pool.query(
       `
       INSERT INTO LeadActivities
-      (LeadId, ActivityType, Notes, StatusId, ActivityDate, ContactId)
-      VALUES (?, 'Meeting', ?, ?, ?, NULL)
+      (LeadId, CompanyId, ActivityType, Notes, StatusId, ActivityDate, ContactId)
+      VALUES (?, ?, 'Meeting', ?, ?, ?, NULL)
       `,
-      [leadId, meetingNote, statusId, start]
+      [leadId, companyId, meetingNote, statusId, start]
     );
+
+    await calculateAndStoreLeadScore(pool, leadId);
 
     try {
       const [meetingTableRows]: any = await pool.query(
@@ -264,6 +280,7 @@ export async function POST(
           INSERT INTO LeadMeetings
           (
             LeadId,
+            CompanyId,
             ActivityId,
             Subject,
             Agenda,
@@ -283,10 +300,11 @@ export async function POST(
             CreatedAt,
             UpdatedAt
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'teams', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'teams', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
           `,
           [
             leadId,
+            companyId,
             insertActivity?.insertId ?? null,
             String(subject).trim(),
             String(agenda || "").trim() || null,

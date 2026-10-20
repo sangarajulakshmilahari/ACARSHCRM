@@ -32,6 +32,7 @@ type SaveSowInput = {
   fileBuffer: Buffer;
   createdBy: number | null;
   replaceExisting: boolean;
+  companyId: number;
 };
 
 export async function saveSowForProject(input: SaveSowInput): Promise<{
@@ -54,7 +55,12 @@ export async function saveSowForProject(input: SaveSowInput): Promise<{
     fileBuffer,
     createdBy,
     replaceExisting,
+    companyId,
   } = input;
+
+  if (!(Number(companyId) > 0)) {
+    throw new SowApiError("Company membership required", 403);
+  }
 
   if (!projectId && !customerName) {
     throw new SowApiError("Either projectId or customerName is required.", 400);
@@ -62,6 +68,17 @@ export async function saveSowForProject(input: SaveSowInput): Promise<{
 
   const parsed = await parseSowDocxBuffer(fileBuffer, fileName);
   const finalClient = String(customerName || parsed.client || "").trim() || "Unknown Client";
+
+  if (projectId) {
+    const [projectRows]: any = await conn.query(
+      `SELECT CompanyId FROM Projects WHERE ProjectId = ? LIMIT 1`,
+      [projectId]
+    );
+    const projectCompanyId = Number(projectRows?.[0]?.CompanyId);
+    if (!(projectCompanyId > 0) || projectCompanyId !== Number(companyId)) {
+      throw new SowApiError("Project does not belong to the active company.", 403);
+    }
+  }
 
   const masterCols = await getTableColumns(conn, "SOWMaster");
   const has = (name: string) => masterCols.has(name);
@@ -175,6 +192,7 @@ export async function saveSowForProject(input: SaveSowInput): Promise<{
   };
 
   addColumn("ProjectId", projectId ?? null);
+  addColumn("CompanyId", companyId);
   addColumn("SOWName", parsed.sowName);
   addColumn("Client", finalClient);
   addColumn(fileNameColumn, fileName);
@@ -223,13 +241,14 @@ export async function saveSowForProject(input: SaveSowInput): Promise<{
   for (const resource of parsed.resources) {
     const [positionInsert]: any = await conn.query(
       `
-      INSERT INTO SOWPosition (SOWId, PositionNumber, Role${pHas("StartDate") ? ", StartDate" : ""}${pHas("EndDate") ? ", EndDate" : ""}${pHas("IsActive") ? ", IsActive" : ""})
-      VALUES (?, ?, ?${pHas("StartDate") ? ", ?" : ""}${pHas("EndDate") ? ", ?" : ""}${pHas("IsActive") ? ", 1" : ""})
+      INSERT INTO SOWPosition (SOWId, PositionNumber, Role${pHas("CompanyId") ? ", CompanyId" : ""}${pHas("StartDate") ? ", StartDate" : ""}${pHas("EndDate") ? ", EndDate" : ""}${pHas("IsActive") ? ", IsActive" : ""})
+      VALUES (?, ?, ?${pHas("CompanyId") ? ", ?" : ""}${pHas("StartDate") ? ", ?" : ""}${pHas("EndDate") ? ", ?" : ""}${pHas("IsActive") ? ", 1" : ""})
       `,
       [
         sowId,
         positionNumber,
         resource.role.trim(),
+        ...(pHas("CompanyId") ? [companyId] : []),
         ...(pHas("StartDate") ? [resource.startDate] : []),
         ...(pHas("EndDate") ? [resource.endDate] : []),
       ]
@@ -239,6 +258,10 @@ export async function saveSowForProject(input: SaveSowInput): Promise<{
 
     const rColumns: string[] = ["SOWPositionId", "Resource"];
     const rValues: any[] = [sowPositionId, resource.resourceName];
+    if (rHas("CompanyId")) {
+      rColumns.push("CompanyId");
+      rValues.push(companyId);
+    }
     if (rHas("Location")) {
       rColumns.push("Location");
       rValues.push(resource.location);

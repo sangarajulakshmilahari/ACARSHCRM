@@ -11,6 +11,7 @@ from acarsh_mcp.catalog import EntitySpec, FieldSpec, get_entity
 from acarsh_mcp.config import Settings
 from acarsh_mcp.db import Database
 from acarsh_mcp.errors import NotFoundError, ValidationError
+from acarsh_mcp.lead_scoring import backfill_lead_scores_once
 from acarsh_mcp.models import (
     AggregateFunction,
     AggregateRequest,
@@ -387,7 +388,17 @@ class QueryService:
         assert actor is not None
         return AccessPolicy.for_entity(entity, actor)
 
+    def _ensure_lead_scores(self, entity: str) -> None:
+        if entity != "leads":
+            return
+        actor = self.actors.current()
+        if actor is None:
+            return
+        with self.database.transaction() as conn:
+            backfill_lead_scores_once(conn)
+
     def search(self, request: SearchRequest) -> dict:
+        self._ensure_lead_scores(request.entity)
         compiled = self.compiler.compile_search(request, self._scope(request.entity))
         rows = self.database.fetch_all(compiled.sql, compiled.params)
         total_row = self.database.fetch_one(compiled.count_sql or "", compiled.count_params)
@@ -405,6 +416,7 @@ class QueryService:
         }
 
     def get_record(self, entity: str, record_id: int) -> dict:
+        self._ensure_lead_scores(entity)
         compiled = self.compiler.compile_get(entity, record_id, self._scope(entity))
         row = self.database.fetch_one(compiled.sql, compiled.params)
         if row is None:
@@ -412,6 +424,7 @@ class QueryService:
         return {"status": "ok", "entity": entity, "record": row}
 
     def aggregate(self, request: AggregateRequest) -> dict:
+        self._ensure_lead_scores(request.entity)
         compiled = self.compiler.compile_aggregate(request, self._scope(request.entity))
         rows = self.database.fetch_all(compiled.sql, compiled.params)
         return {"status": "ok", "entity": request.entity, "items": rows}

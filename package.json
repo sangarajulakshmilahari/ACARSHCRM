@@ -6,7 +6,9 @@
     "dev": "next dev -H 0.0.0.0 -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:security": "tsx --test app/api/lib/auth.security.test.ts app/api/lib/lead-access.security.test.ts app/api/lib/opportunity-contacts-route.security.test.ts app/api/lib/company-tenancy.test.ts app/api/lib/company-isolation.test.ts app/api/lib/company-selector.test.ts",
+    "test:isolation": "tsx --test --test-concurrency=1 app/api/lib/company-isolation.integration.test.ts app/api/lib/company-isolation.http.integration.test.ts"
   },
   "dependencies": {
     "@azure/identity": "^4.13.1",
@@ -39,6 +41,7 @@
     "@types/node": "24.10.0",
     "@types/pdf-parse": "^1.1.5",
     "prisma": "^6.19.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0"
   }
 }

@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
 
 // PATCH — update outreach fields on a single contact
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { leadID: string; contactID: string } }
 ) {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const contactId = Number(params.contactID);
   const leadId = Number(params.leadID);
 
@@ -17,6 +25,12 @@ export async function PATCH(
   const { LinkedInRequestSent, LinkedInRequestAccepted, EmailSent } = body;
 
   const pool = await getPool();
+
+  const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+  if (!hasLeadAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const conn = await pool.getConnection();
 
   try {
@@ -42,10 +56,16 @@ export async function PATCH(
 
     values.push(contactId, leadId);
 
-    await conn.query(
+    const [result]: any = await conn.query(
       `UPDATE LeadContacts SET ${fields.join(", ")} WHERE LeadContactID = ? AND LeadId = ?`,
       values
     );
+
+    if (!result?.affectedRows) {
+      return NextResponse.json({ error: "Contact not found" }, { status: 404 });
+    }
+
+    await calculateAndStoreLeadScore(conn, leadId);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

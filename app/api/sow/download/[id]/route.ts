@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 
 async function getTableColumns(pool: any, tableName: string): Promise<Set<string>> {
   const [rows]: any = await pool.query(
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const companyId = requireCompanyId(authUser);
 
     const sowId = Number(params.id);
     if (!sowId || Number.isNaN(sowId)) {
@@ -44,10 +46,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       SELECT ${fileNameSelect}, ${fileDataSelect}
       FROM SOWMaster
       WHERE SOWId = ?
+        ${has("CompanyId") ? "AND CompanyId = ?" : ""}
         ${has("IsActive") ? "AND IsActive = 1" : ""}
       LIMIT 1
       `,
-      [sowId]
+      has("CompanyId") ? [sowId, companyId] : [sowId]
     );
 
     const row = rows?.[0];
@@ -66,6 +69,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       },
     });
   } catch (error: any) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     return NextResponse.json({ error: error?.message || "Failed to download SOW" }, { status: 500 });
   }
 }

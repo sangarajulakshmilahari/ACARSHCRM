@@ -91,6 +91,7 @@ ENTITIES: dict[str, EntitySpec] = {
             LEFT JOIN Users u ON u.UserId = l.OwnerId
             LEFT JOIN AccountTypes at ON at.AccountTypeId = l.AccountTypeId
             LEFT JOIN LeadStatuses direct_status ON direct_status.StatusId = l.StatusId
+            LEFT JOIN LeadScores lscr ON lscr.LeadId = l.LeadId
         """,
         primary_key="id",
         fields={
@@ -113,6 +114,18 @@ ENTITIES: dict[str, EntitySpec] = {
             "is_deleted": _f("COALESCE(l.IsDeleted, 0)", "boolean", "Soft-deletion flag"),
             "industry_focus": _f("l.IndustryFocus", "string", "Industry focus"),
             "tags": _f("l.Tags", "string", "Comma-separated lead tags"),
+            "lead_score": _f("COALESCE(lscr.Score, 0)", "integer", "Deterministic lead score out of 100"),
+            "lead_score_rating": _f(
+                "COALESCE(lscr.Rating, 'COLD')",
+                "string",
+                "Lead score rating: HOT, WARM, or COLD",
+            ),
+            "lead_score_breakdown": _f(
+                "lscr.Breakdown",
+                "string",
+                "Lead score criteria breakdown in JSON",
+                sortable=False,
+            ),
         },
         default_fields=(
             "id",
@@ -120,6 +133,8 @@ ENTITIES: dict[str, EntitySpec] = {
             "company_location",
             "account_type",
             "status",
+            "lead_score",
+            "lead_score_rating",
             "owner_name",
             "lead_date",
             "created_on",

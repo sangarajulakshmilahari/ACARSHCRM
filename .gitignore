@@ -10,4 +10,4 @@ config/db.ts
 
 /app/generated/prisma
 
-database/migrations
+database/backups

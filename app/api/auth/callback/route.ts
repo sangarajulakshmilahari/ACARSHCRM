@@ -1,15 +1,26 @@
+import { NextResponse } from "next/server";
 import { keycloak } from "../../lib/keycloak";
 import { resolveAuthUserFromAccessToken } from "@/app/api/lib/auth";
+import { getPool } from "@/config/db";
+import {
+  ACTIVE_COMPANY_COOKIE,
+  COMPANY_SELECTION_PATH,
+  POST_LOGIN_DASHBOARD_PATH,
+  isSafePostLoginPath,
+  loadCompanyMemberships,
+  resolveBrowserRedirectOrigin,
+  resolvePostLoginDestination,
+} from "@/app/api/lib/company-tenancy";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
+  const origin = resolveBrowserRedirectOrigin(req.url, req.headers.get("x-forwarded-host"));
   const code = url.searchParams.get("code");
 
   if (!code) {
     return new Response("No authorization code", { status: 400 });
   }
 
-  // Exchange code for token
   const tokenResponse = await fetch(keycloak.tokenUrl, {
     method: "POST",
     headers: {
@@ -39,54 +50,49 @@ export async function GET(req: Request) {
 
   const resolved = await resolveAuthUserFromAccessToken(accessToken);
   if (!resolved) {
-    let keycloakId: string | null = null;
-    try {
-      const payloadPart = accessToken.split(".")[1] || "";
-      const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
-      const padded = normalized.padEnd(
-        normalized.length + ((4 - (normalized.length % 4)) % 4),
-        "="
-      );
-      const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-      keycloakId = String(payload?.sub || "") || null;
-    } catch {
-      // keep null; logging handled below
-    }
-
-    console.warn("[auth/callback] Keycloak user not found in ACARSH Users table", {
-      keycloakId,
-    });
-
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: "/access_denied",
-      },
-    });
+    console.warn("[auth/callback] Keycloak user not found in ACARSH Users table");
+    return NextResponse.redirect(new URL("/access_denied", origin), 302);
   }
+
+  const pool = await getPool();
+  const memberships = await loadCompanyMemberships(pool, resolved.userId);
+  const destination = resolvePostLoginDestination({ memberships, selectedCompanyId: null });
+  const location = isSafePostLoginPath(destination.path) ? destination.path : POST_LOGIN_DASHBOARD_PATH;
 
   console.info("[auth/callback] ACARSH user resolved", {
     userId: resolved.userId,
     roleId: resolved.roleId,
     matchedBy: resolved.matchedBy,
+    destination: destination.kind,
   });
 
   const isProd = process.env.NODE_ENV === "production";
-  const cookieParts = [
-    `access_token=${accessToken}`,
-    "HttpOnly",
-    "Path=/",
-    "SameSite=Lax",
-    isProd ? "Secure" : "",
-  ].filter(Boolean);
-
-  //  Set token in HTTP-only cookie
-  return new Response(null, {
-    status: 302,
-    headers: {
-      "Set-Cookie": cookieParts.join("; "),
-      Location: "/webpage",
-    },
+  const response = NextResponse.redirect(new URL(location, origin), 302);
+  response.cookies.set("access_token", accessToken, {
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secure: isProd,
   });
-}
+  if (destination.kind === "dashboard") {
+    response.cookies.set(ACTIVE_COMPANY_COOKIE, String(destination.companyId), {
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: isProd,
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  } else {
+    response.cookies.set(ACTIVE_COMPANY_COOKIE, "", {
+      httpOnly: true,
+      path: "/",
+      maxAge: 0,
+    });
+  }
 
+  if (location !== POST_LOGIN_DASHBOARD_PATH && location !== COMPANY_SELECTION_PATH) {
+    return NextResponse.redirect(new URL(POST_LOGIN_DASHBOARD_PATH, origin), 302);
+  }
+
+  return response;
+}

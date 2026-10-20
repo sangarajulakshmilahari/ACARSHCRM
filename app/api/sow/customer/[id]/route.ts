@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 
 async function getTableColumns(pool: any, tableName: string): Promise<Set<string>> {
   const [rows]: any = await pool.query(
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const companyId = requireCompanyId(authUser);
 
     const customerId = Number(params.id);
     if (!customerId || Number.isNaN(customerId)) {
@@ -39,9 +41,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       SELECT LeadId, CompanyName
       FROM Leads
       WHERE LeadId = ?
+        AND CompanyId = ?
       LIMIT 1
       `,
-      [customerId]
+      [customerId, companyId]
     );
 
     const customer = customerRows?.[0];
@@ -77,6 +80,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       LEFT JOIN Projects p
         ON ${has("ProjectId") ? "p.ProjectId = s.ProjectId" : "1 = 0"}
       WHERE ${has("IsActive") ? "s.IsActive = 1" : "1 = 1"}
+        ${has("CompanyId") ? "AND s.CompanyId = ?" : ""}
         AND (
           (
             ${has("ProjectId") ? "s.ProjectId IS NOT NULL" : "1 = 0"}
@@ -84,6 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
               SELECT ProjectId
               FROM Projects
               WHERE CustomerId = ?
+                AND CompanyId = ?
                 AND COALESCE(IsDeleted, 0) = 0
             )
           )
@@ -94,7 +99,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         )
       ORDER BY COALESCE(${has("IsCurrent") ? "s.IsCurrent" : "0"}, 0) DESC, ${has("UploadedOn") ? "s.UploadedOn" : "s.SOWId"} DESC, s.SOWId DESC
       `,
-      [customerId, customerName]
+      has("CompanyId") ? [companyId, customerId, companyId, customerName] : [customerId, companyId, customerName]
     );
 
     const mapped = (rows || []).map((s: any) => ({
@@ -146,6 +151,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       sows: effectiveSows,
     });
   } catch (error: any) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     return NextResponse.json({ error: error?.message || "Failed to fetch customer SOWs" }, { status: 500 });
   }
 }

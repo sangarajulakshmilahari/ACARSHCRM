@@ -502,6 +502,14 @@
   min-width: 0;
 }
 
+.userMessageStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+}
+
 /* Message Bubbles */
 .assistantBubble {
   width: 100%;
@@ -515,7 +523,7 @@
   color: #243b5a;
   border: 0;
   box-shadow: none;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
   animation: slideIn 0.3s ease-out;
@@ -540,6 +548,49 @@
   animation: slideIn 0.3s ease-out;
   position: relative;
   z-index: 1;
+}
+
+.messageAttachmentList {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: 100%;
+}
+
+.messageAttachmentCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid rgba(31, 58, 104, 0.16);
+  box-shadow: 0 2px 8px rgba(15, 31, 61, 0.08);
+  color: #1f3a68;
+  font-size: 12px;
+}
+
+.messageAttachmentIcon {
+  display: inline-grid;
+  place-items: center;
+  color: #06b6d4;
+  flex: 0 0 auto;
+}
+
+.messageAttachmentName {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.messageAttachmentSize {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 @keyframes slideIn {
@@ -592,8 +643,50 @@
   color: #F26522;
 }
 
+.assistantMarkdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.assistantHeading {
+  margin: 10px 0 0;
+  color: #1f3a68;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.assistantHeading:first-child {
+  margin-top: 0;
+}
+
+.assistantRule {
+  width: 100%;
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid #dbe4f0;
+}
+
+.assistantList {
+  margin: 0 0 0 18px;
+  padding: 0;
+}
+
+.assistantCodeBlock {
+  margin: 4px 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #0f1f3d;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .assistantTextBlock {
-  margin: 0 0 12px;
+  margin: 0;
 }
 
 .assistantTextBlock:last-child {
@@ -892,6 +985,8 @@
 
 .inputContainer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid rgba(31, 58, 104, 0.14);
@@ -900,6 +995,106 @@
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
   position: relative;
   z-index: 2;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.pendingAttachmentsWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  width: 100%;
+}
+
+.pendingAttachmentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 58, 104, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+  font-size: 12px;
+  color: #1f3a68;
+}
+
+.pendingAttachmentIcon {
+  display: inline-grid;
+  place-items: center;
+  color: #06b6d4;
+  flex: 0 0 auto;
+}
+
+.pendingAttachmentName {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.pendingAttachmentSize {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pendingAttachmentRemove {
+  display: inline-grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 58, 104, 0.16);
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pendingAttachmentRemove:hover:not(:disabled) {
+  color: #f26522;
+  border-color: rgba(242, 101, 34, 0.45);
+}
+
+.pendingAttachmentRemove:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.attachmentError {
+  width: 100%;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.attachButton {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 58, 104, 0.16);
+  background: #ffffff;
+  color: #1f3a68;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 0 0 auto;
+}
+
+.attachButton:hover:not(:disabled) {
+  color: #06b6d4;
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.12);
+}
+
+.attachButton:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
 }
 
 .inputField {
@@ -953,6 +1148,128 @@
   cursor: not-allowed;
 }
 
+.importCard {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(31, 58, 104, 0.16);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(15, 31, 61, 0.08);
+}
+
+.importTitle {
+  color: #1f3a68;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.importHint,
+.importSummary,
+.importPreviewRow {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.importMapList,
+.importPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.importPreview {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.importMapRow,
+.importPreviewRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.importPreviewRow {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.importCol {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #1f3a68;
+}
+
+.importSelect,
+.importInput {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid rgba(31, 58, 104, 0.18);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.importMissing {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.importMiniBtn,
+.importCancel,
+.importConfirm {
+  margin-top: 8px;
+  margin-right: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.importMiniBtn,
+.importCancel {
+  border: 1px solid rgba(31, 58, 104, 0.18);
+  background: #fff;
+  color: #1f3a68;
+}
+
+.importConfirm {
+  border: 0;
+  background: linear-gradient(135deg, #f26522 0%, #d95317 100%);
+  color: #fff;
+}
+
+.importConfirm:disabled,
+.importMiniBtn:disabled,
+.importCancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.importActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Scrollbar Styling */
 .messagesContainer::-webkit-scrollbar {
   width: 6px;
@@ -987,6 +1304,15 @@
     max-width: 90%;
   }
 
+  .userMessageStack {
+    max-width: 100%;
+  }
+
+  .messageAttachmentName,
+  .pendingAttachmentName {
+    max-width: 140px;
+  }
+
   .assistantBubble {
     max-width: 100%;
   }
@@ -1010,5 +1336,168 @@
 
   .conversationBar {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* Sidebar Droit Buddy tab + right-side drawer */
+.sidebarTab {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(18, 183, 201, 0.28);
+  background: rgba(18, 183, 201, 0.12);
+  color: #d9fbff;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+  justify-content: flex-start;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebarTab:hover {
+  background: rgba(18, 183, 201, 0.2);
+  border-color: rgba(18, 183, 201, 0.5);
+}
+
+.sidebarTab:focus-visible {
+  outline: 2px solid #12b7c9;
+  outline-offset: 2px;
+}
+
+.sidebarTabOpen {
+  background: linear-gradient(135deg, #12b7c9 0%, #0d94a4 100%);
+  border-color: #12b7c9;
+  color: #ffffff;
+}
+
+.sidebarTabCollapsed {
+  width: 100%;
+  padding: 10px 6px;
+  gap: 0;
+  justify-content: center;
+}
+
+.sidebarTabIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sidebarTabLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebarTabBadge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f26522;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sidebarTabCollapsed .sidebarTabBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  margin-left: 0;
+}
+
+.assistantOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  background: rgba(15, 31, 61, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.assistantOverlayVisible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.assistantDrawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 47;
+  width: min(430px, 100vw);
+  max-width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: #eef4f7;
+  box-shadow: none;
+  overflow: hidden;
+  transform: translateX(100%);
+  pointer-events: none;
+  visibility: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, visibility 0.25s ease;
+}
+
+.assistantDrawerOpen {
+  transform: translateX(0);
+  pointer-events: auto;
+  visibility: visible;
+  box-shadow: -8px 0 28px rgba(15, 31, 61, 0.18);
+}
+
+.assistantDrawer:focus {
+  outline: none;
+}
+
+.assistantDrawer:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 1280px) {
+  .assistantDrawer {
+    width: min(400px, 100vw);
+  }
+}
+
+@media (max-width: 1024px) {
+  .assistantDrawer {
+    width: min(380px, 92vw);
+  }
+}
+
+@media (max-width: 768px) {
+  .assistantDrawer {
+    width: min(100vw, 100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebarTab,
+  .assistantOverlay,
+  .assistantDrawer {
+    transition: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .assistantDrawer {
+    width: 100vw;
   }
 }
