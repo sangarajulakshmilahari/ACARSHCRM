@@ -8,6 +8,8 @@
       try {
         const pool = await getPool();
 
+        // SubCategory is an intentionally global lookup: the table has no CompanyId
+        // and is shared across tenants as a catalog, like Category.
         const [rows]: any = await pool.query(`
           SELECT
             c.CategoryId,

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "../../../../lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
+import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
 
 type ProjectResourceInput = {
   employeeId?: string | number | null;
@@ -221,7 +224,8 @@ function parseStoredProjectResource(value: any, fallbackEmployeeName?: string | 
 async function replaceProjectContacts(
   conn: any,
   projectId: number,
-  contacts: Array<{ contactName: string; title: string | null; email: string | null; phone: string | null }>
+  contacts: Array<{ contactName: string; title: string | null; email: string | null; phone: string | null }>,
+  companyId: number
 ) {
   await conn.query(`DELETE FROM ProjectContacts WHERE ProjectId = ?`, [projectId]);
 
@@ -237,11 +241,12 @@ async function replaceProjectContacts(
   for (const contact of contacts) {
     await conn.query(
       `
-      INSERT INTO ProjectContacts (ProjectId, ContactName, Title, Email, Phone, ContactTypeId)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO ProjectContacts (ProjectId, CompanyId, ContactName, Title, Email, Phone, ContactTypeId)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         projectId,
+        companyId,
         contact.contactName,
         contact.title || null,
         contact.email || null,
@@ -263,7 +268,8 @@ async function replaceProjectResources(
     endDate: string | null;
     reportingManager: string | null;
     reportingManagerTitle: string | null;
-  }>
+  }>,
+  companyId: number
 ) {
   await conn.query(`DELETE FROM ProjectResources WHERE ProjectId = ?`, [projectId]);
 
@@ -273,6 +279,7 @@ async function replaceProjectResources(
       `
       INSERT INTO ProjectResources (
         ProjectId,
+        CompanyId,
         EmployeeId,
         Title,
         ReportingManager,
@@ -280,10 +287,11 @@ async function replaceProjectResources(
         StartDate,
         EndDate
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         projectId,
+        companyId,
         serializedResource,
         resource.title || null,
         resource.reportingManager || null,
@@ -322,6 +330,11 @@ export async function GET(
     }
 
     const pool = await getPool();
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const conn = await pool.getConnection();
 
     try {
@@ -574,6 +587,15 @@ export async function POST(
     }
 
     const pool = await getPool();
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const companyId = resolveWriteCompanyId(
+      authUser.companyId,
+      await loadRecordCompanyId(pool, "lead", leadId)
+    );
+
     conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -582,9 +604,9 @@ export async function POST(
       const [inserted]: any = await conn.query(
         `
         INSERT INTO projects
-          (ProjectCode, ProjectName, ProjectDesc, TechStack, KeyWork, ValueAdded, Deliverables, Challenges, StartDate, EndDate, CustomerId, IsHidden)
+          (ProjectCode, ProjectName, ProjectDesc, TechStack, KeyWork, ValueAdded, Deliverables, Challenges, StartDate, EndDate, CustomerId, CompanyId, IsHidden)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         `,
         [
           ProjectCode ?? null,
@@ -598,6 +620,7 @@ export async function POST(
           StartDate || null,
           EndDate || null,
           customerId,
+          companyId,
         ]
       );
 
@@ -622,8 +645,9 @@ export async function POST(
         [inserted.insertId]
       );
 
-      await replaceProjectContacts(conn, inserted.insertId, normalizedContacts);
-      await replaceProjectResources(conn, inserted.insertId, normalizedResources);
+      await replaceProjectContacts(conn, inserted.insertId, normalizedContacts, companyId);
+      await replaceProjectResources(conn, inserted.insertId, normalizedResources, companyId);
+      await calculateAndStoreLeadScore(conn, leadId);
 
       await conn.commit();
 
@@ -688,10 +712,19 @@ export async function PUT(
     }
 
     const pool = await getPool();
+    const hasLeadAccess = await canUserViewLeadById(pool, authUser, leadId);
+    if (!hasLeadAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const companyId = resolveWriteCompanyId(
+      authUser.companyId,
+      await loadRecordCompanyId(pool, "lead", leadId)
+    );
+
     conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      await conn.query(
+      const [updateResult]: any = await conn.query(
         `
         UPDATE projects p
         SET
@@ -728,6 +761,11 @@ export async function PUT(
         ]
       );
 
+      if (!updateResult?.affectedRows) {
+        await conn.rollback();
+        return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      }
+
       const [rows]: any = await conn.query(
         `
         SELECT
@@ -749,8 +787,9 @@ export async function PUT(
         [projectId]
       );
 
-      await replaceProjectContacts(conn, projectId, normalizedContacts);
-      await replaceProjectResources(conn, projectId, normalizedResources);
+      await replaceProjectContacts(conn, projectId, normalizedContacts, companyId);
+      await replaceProjectResources(conn, projectId, normalizedResources, companyId);
+      await calculateAndStoreLeadScore(conn, leadId);
 
       await conn.commit();
 

@@ -6,7 +6,7 @@ export async function GET() {
     `/protocol/openid-connect/logout` +
     `?client_id=${process.env.KEYCLOAK_CLIENT_ID}` +
     `&post_logout_redirect_uri=${encodeURIComponent(
-      "http://localhost:3001/api/auth/login"
+      "https://acarsh.adroitent.ai/api/auth/login"
     )}`;
 
     console.log(process.env.KEYCLOAK_URL);
@@ -16,6 +16,11 @@ export async function GET() {
 
   // Clear our app cookie
   res.cookies.set("access_token", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("acarsh_active_company_id", "", {
     httpOnly: true,
     path: "/",
     maxAge: 0,

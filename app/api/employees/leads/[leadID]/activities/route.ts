@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
+import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
+
+const deps = {
+  getPool,
+  getAuthUser,
+  canUserViewLeadById,
+};
 
 //  POST → CREATE ACTIVITY
 
@@ -8,6 +18,11 @@ export async function POST(
   { params }: { params: { leadID: string } },
 ) {
   try {
+    const authUser = await deps.getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { Mode, Notes, Status, ActivityDate, ContactId } = await req.json();
 
     //  Strong validation
@@ -23,7 +38,13 @@ export async function POST(
       return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
     }
 
-    const pool = await getPool();
+    const pool = await deps.getPool();
+    const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const parentCompanyId = await loadRecordCompanyId(pool, "lead", leadId);
+    const companyId = resolveWriteCompanyId(authUser.companyId, parentCompanyId);
 
     //  1 Resolve StatusId
 
@@ -43,11 +64,12 @@ export async function POST(
     const [insertResult]: any = await pool.query(
       `
       INSERT INTO LeadActivities
-        (LeadId, ActivityType, Notes, StatusId, ActivityDate, ContactId)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (LeadId, CompanyId, ActivityType, Notes, StatusId, ActivityDate, ContactId)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         leadId,
+        companyId,
         Mode,
         Notes,
         StatusId,
@@ -56,12 +78,14 @@ export async function POST(
       ],
     );
 
+    await calculateAndStoreLeadScore(pool, leadId);
+
     //  3 Fetch contact name for the response
     let contactName: string | null = null;
     if (ContactId) {
       const [cRows]: any = await pool.query(
-        `SELECT ContactName FROM LeadContacts WHERE LeadContactID = ?`,
-        [ContactId],
+        `SELECT ContactName FROM LeadContacts WHERE LeadContactID = ? AND CompanyId = ?`,
+        [ContactId, companyId],
       );
       contactName = cRows[0]?.ContactName ?? null;
     }
@@ -90,7 +114,17 @@ export async function PUT(
   { params }: { params: { leadID: string } },
 ) {
   try {
+    const authUser = await deps.getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { ActivityId, Mode, Notes, Status, ActivityDate, ContactId } = await req.json();
+    const leadId = Number(params.leadID);
+
+    if (isNaN(leadId)) {
+      return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
+    }
 
     if (!ActivityId) {
       return NextResponse.json(
@@ -99,7 +133,11 @@ export async function PUT(
       );
     }
 
-    const pool = await getPool();
+    const pool = await deps.getPool();
+    const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     //  1 Resolve StatusId
 
@@ -116,6 +154,9 @@ export async function PUT(
 
     //  2 Update Activity
 
+    const parentCompanyId = await loadRecordCompanyId(pool, "lead", leadId);
+    const companyId = resolveWriteCompanyId(authUser.companyId, parentCompanyId);
+
     await pool.query(
       `
       UPDATE LeadActivities
@@ -126,6 +167,8 @@ export async function PUT(
         ActivityDate = ?,
         ContactId = ?
       WHERE ActivityId = ?
+        AND LeadId = ?
+        AND CompanyId = ?
       `,
       [
         Mode,
@@ -134,8 +177,12 @@ export async function PUT(
         ActivityDate ? new Date(ActivityDate) : new Date(),
         ContactId ?? null,
         ActivityId,
+        leadId,
+        companyId,
       ],
     );
+
+    await calculateAndStoreLeadScore(pool, leadId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -152,13 +199,22 @@ export async function GET(
   { params }: { params: { leadID: string } },
 ) {
   try {
+    const authUser = await deps.getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const leadId = Number(params.leadID);
 
     if (isNaN(leadId)) {
       return NextResponse.json({ error: "Invalid LeadId" }, { status: 400 });
     }
 
-    const pool = await getPool();
+    const pool = await deps.getPool();
+    const hasAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const [rows]: any = await pool.query(
       `

@@ -1,6 +1,9 @@
+import { andSql, companyPredicate } from "@/app/api/lib/company-tenancy";
+
 export type AuthUserScope = {
   userId: number;
   roleId: number;
+  companyId?: number | null;
 };
 
 export function hasGlobalLeadAccess(roleId: number): boolean {
@@ -11,13 +14,14 @@ export function buildLeadOwnerVisibilityClause(
   authUser: AuthUserScope,
   leadTableAlias = "l"
 ): { clause: string; params: number[] } {
+  const tenant = companyPredicate(leadTableAlias, authUser.companyId);
+
   if (hasGlobalLeadAccess(authUser.roleId)) {
-    return { clause: "1=1", params: [] };
+    return tenant;
   }
 
   const ownerColumn = `${leadTableAlias}.OwnerId`;
-
-  return {
+  const ownerScope = {
     clause: `(${ownerColumn} = ? OR ${ownerColumn} IN (
       SELECT ula.allowed_user_id
       FROM user_lead_access ula
@@ -25,6 +29,8 @@ export function buildLeadOwnerVisibilityClause(
     ))`,
     params: [authUser.userId, authUser.userId],
   };
+
+  return andSql([tenant, ownerScope]);
 }
 
 export async function canUserViewLeadById(
@@ -32,28 +38,17 @@ export async function canUserViewLeadById(
   authUser: AuthUserScope,
   leadId: number
 ): Promise<boolean> {
-  if (hasGlobalLeadAccess(authUser.roleId)) {
-    return true;
-  }
-
+  const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
   const [rows]: any = await poolOrConn.query(
     `
     SELECT 1
     FROM Leads l
     WHERE l.LeadId = ?
-      AND (
-        l.OwnerId = ?
-        OR l.OwnerId IN (
-          SELECT ula.allowed_user_id
-          FROM user_lead_access ula
-          WHERE ula.user_id = ?
-        )
-      )
+      AND ${visibility.clause}
     LIMIT 1
     `,
-    [leadId, authUser.userId, authUser.userId]
+    [leadId, ...visibility.params]
   );
 
   return Array.isArray(rows) && rows.length > 0;
 }
-

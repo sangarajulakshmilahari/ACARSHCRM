@@ -24,7 +24,7 @@ def compiler() -> SemanticQueryCompiler:
 def test_semantic_plan_compiles_role_scoped_not_exists_relationship(
     compiler: SemanticQueryCompiler,
 ) -> None:
-    actor = ActorContext(user_id=42, role_id=SALES_EXECUTIVE_ROLE_ID)
+    actor = ActorContext(user_id=42, role_id=SALES_EXECUTIVE_ROLE_ID, company_id=9)
     plan = SemanticQueryPlan(
         entity="leads",
         fields=["company_name", "owner_name", "status"],
@@ -69,7 +69,7 @@ def test_semantic_plan_supports_related_record_count(
 
     compiled = compiler.compile(
         plan,
-        ActorContext(user_id=1, role_id=MANAGER_ROLE_ID),
+        ActorContext(user_id=1, role_id=MANAGER_ROLE_ID, company_id=9),
     )
 
     assert "COUNT(DISTINCT c.LeadContactID)" in compiled.query.sql
@@ -90,7 +90,7 @@ def test_semantic_plan_supports_grouped_metric_having_and_sort(
 
     compiled = compiler.compile(
         plan,
-        ActorContext(user_id=1, role_id=MANAGER_ROLE_ID),
+        ActorContext(user_id=1, role_id=MANAGER_ROLE_ID, company_id=9),
     )
 
     assert compiled.mode == "aggregate"
@@ -108,4 +108,4 @@ def test_semantic_plan_rejects_unknown_relationship(
     )
 
     with pytest.raises(ValidationError):
-        compiler.compile(plan, ActorContext(user_id=1, role_id=MANAGER_ROLE_ID))
+        compiler.compile(plan, ActorContext(user_id=1, role_id=MANAGER_ROLE_ID, company_id=9))

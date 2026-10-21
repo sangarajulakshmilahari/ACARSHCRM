@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "../lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "../lib/company-tenancy";
 import { buildLeadOwnerVisibilityClause } from "../lib/lead-access";
 
 export async function GET(req: NextRequest) {
@@ -9,6 +10,7 @@ export async function GET(req: NextRequest) {
     if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    requireCompanyId(authUser);
 
     const pool = await getPool();
     const visibility = buildLeadOwnerVisibilityClause(authUser, "l");
@@ -191,6 +193,9 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     console.error("DASHBOARD ROUTE ERROR:", error);
     return NextResponse.json(
       { error: "Failed to fetch dashboard data" },

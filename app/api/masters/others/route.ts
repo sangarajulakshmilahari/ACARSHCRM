@@ -1,8 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const companyId = requireCompanyId(authUser);
     const pool = await getPool();
 
 
@@ -37,8 +44,9 @@ export async function GET() {
       SELECT DISTINCT CompanyName
       FROM Leads
       WHERE CompanyName IS NOT NULL
+        AND CompanyId = ?
       ORDER BY CompanyName
-    `);
+    `, [companyId]);
 
 
     //  Lead Sources
@@ -47,18 +55,23 @@ export async function GET() {
       SELECT DISTINCT LeadSource
       FROM Leads
       WHERE LeadSource IS NOT NULL
+        AND CompanyId = ?
       ORDER BY LeadSource
-    `);
+    `, [companyId]);
 
 
     //  Owners
 
     const [ownername]: any = await pool.query(`
-      SELECT DISTINCT UserId, UserName
-      FROM Users
-      WHERE UserName IS NOT NULL
-      ORDER BY UserId
-    `);
+      SELECT DISTINCT u.UserId, u.UserName
+      FROM Users u
+      INNER JOIN CompanyUsers cu
+        ON cu.UserId = u.UserId
+       AND cu.CompanyId = ?
+       AND cu.IsActive = 1
+      WHERE u.UserName IS NOT NULL
+      ORDER BY u.UserId
+    `, [companyId]);
 
 
     //  Contact Roles
@@ -115,6 +128,9 @@ export async function GET() {
       probabilities,
     });
   } catch (error) {
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+    }
     console.error("Error fetching master data:", error);
     return NextResponse.json(
       { error: "Failed to fetch statuses" },

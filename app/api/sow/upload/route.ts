@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
 import { getAuthUser } from "@/app/api/lib/auth";
+import { CompanyRequiredError, requireCompanyId } from "@/app/api/lib/company-tenancy";
 import { saveSowForProject, SowApiError } from "../_lib/store";
 
 export async function POST(req: NextRequest) {
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
         fileBuffer,
         createdBy: authUser.userId,
         replaceExisting,
+        companyId: requireCompanyId(authUser),
       });
       await conn.commit();
 
@@ -119,6 +121,9 @@ export async function POST(req: NextRequest) {
         await conn.rollback();
       } catch {}
       conn.release();
+    }
+    if (error instanceof CompanyRequiredError) {
+      return NextResponse.json({ error: "Company membership required" }, { status: 403 });
     }
     return NextResponse.json(
       { error: error?.message || "Failed to process upload" },

@@ -20,7 +20,7 @@ import LeadDetailsClient from "./leads/Leaddetails/LeadDetailsClient";
 import EditLeadClient from "./leads/Editlead/EditLeadClient";
 import ReportsClient from "./reports/ReportsClient";
 
-import CRMChatBot from "../webpage/components/crmchatbot";
+import { useDroitLayout } from "./components/WebpageDroitHost";
 
 // Tabs
 type TabKey =
@@ -101,14 +101,31 @@ export default function WebPageClient(): JSX.Element {
         "leads" | "Prospect" | "Account" | null
     >(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [chatOpen, setChatOpen] = useState(false);
+    const [droitBuddyHost, setDroitBuddyHost] = useState<HTMLDivElement | null>(null);
     const [loggedInUserName, setLoggedInUserName] = useState<string | null>(null);
+    const [activeCompanyId, setActiveCompanyId] = useState<number | null>(null);
+    const [companyAccessError, setCompanyAccessError] = useState<string | null>(null);
+    const { setDroitLayout } = useDroitLayout();
 
-    // Fetch logged-in user name from DB via Keycloak identity
+    // Normalize local dev host to localhost (avoid 0.0.0.0 browser URL issues)
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (window.location.hostname !== "0.0.0.0") return;
+
+        const nextUrl = `${window.location.protocol}//localhost:${window.location.port}${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.replace(nextUrl);
+    }, []);
+
+    // Fetch logged-in user name and authorized company memberships from the server.
     useEffect(() => {
         fetch("/api/auth/me")
             .then((res) => res.ok ? res.json() : null)
-            .then((data) => { if (data?.name) setLoggedInUserName(data.name); })
+            .then((data) => {
+                if (!data) return;
+                if (data.name) setLoggedInUserName(data.name);
+                setActiveCompanyId(Number(data.companyId) > 0 ? Number(data.companyId) : null);
+                setCompanyAccessError(data.accessError || null);
+            })
             .catch(() => {});
     }, []);
 
@@ -234,6 +251,18 @@ export default function WebPageClient(): JSX.Element {
             setLoading(false);
         }
     };
+
+    const refreshListByType = async (type: "lead" | "prospect" | "account") => {
+        if (type === "lead") {
+            await fetchLeadsList();
+            return;
+        }
+        if (type === "prospect") {
+            await fetchProspectsList();
+            return;
+        }
+        await fetchAccountList();
+    };
     // TAB HANDLER 
 
     async function handleTab(tab: TabKey) {
@@ -275,22 +304,65 @@ export default function WebPageClient(): JSX.Element {
 
     const sidebarWidth = sidebarCollapsed ? 64 : 230;
 
+    useEffect(() => {
+        setDroitLayout({
+            buttonHost: droitBuddyHost,
+            sidebarWidth,
+            sidebarCollapsed,
+            contextLeadId: selectedLeadId ?? null,
+            onAction: (action: { type?: string }) => {
+                if (
+                    action.type === "lead_created" ||
+                    action.type === "lead_updated" ||
+                    action.type === "lead_deleted"
+                ) {
+                    if (activeTab === "leads") fetchLeadsList();
+                    else if (activeTab === "Prospect") fetchProspectsList();
+                    else if (activeTab === "Account") fetchAccountList();
+                }
+            },
+        });
+    }, [
+        activeTab,
+        droitBuddyHost,
+        selectedLeadId,
+        setDroitLayout,
+        sidebarCollapsed,
+        sidebarWidth,
+    ]);
+
+    useEffect(() => {
+        return () => setDroitLayout(null);
+    }, [setDroitLayout]);
+
+    const primaryTabs: TabKey[] = [
+        "dashboard",
+        "leads",
+        "Prospect",
+        "Account",
+        "reports",
+    ];
+
     // ---- RENDER CONTENT ----
 
     const renderContent = () => {
         switch (activeTab) {
 
             case "dashboard":
-                return <DashboardPage />;
+                return <DashboardPage key={activeCompanyId ?? "none"} />;
 
             case "leads":
                 return (
                     <EmployeeList
+                        key={`lead-${activeCompanyId ?? "none"}`}
                         type="lead"
                         employees={employeesLocal ?? employeesFromStore}
                         loading={loading}
                         error={error}
                         onAddLead={() => setActiveTab("addLead")}
+                        onDeleteLead={async () => {
+                            await refreshListByType("lead");
+                        }}
                         onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
                             setSelectedLeadOrigin(origin ?? "leads");
@@ -302,11 +374,15 @@ export default function WebPageClient(): JSX.Element {
             case "Prospect":
                 return (
                     <EmployeeList
+                        key={`prospect-${activeCompanyId ?? "none"}`}
                         type="prospect"
                         employees={employeesLocal ?? employeesFromStore}
                         loading={loading}
                         error={error}
                         onAddLead={() => setActiveTab("addProspect")}
+                        onDeleteLead={async () => {
+                            await refreshListByType("prospect");
+                        }}
                         onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
                             setSelectedLeadOrigin(origin ?? "Prospect");
@@ -315,7 +391,7 @@ export default function WebPageClient(): JSX.Element {
                     />
                 );
 
-            case "Account":
+            case "Account": {
                 const accountRowsSource = employeesLocal ?? employeesFromStore;
                 const accountRows: Employee[] = Array.isArray(accountRowsSource)
                     ? accountRowsSource
@@ -326,46 +402,32 @@ export default function WebPageClient(): JSX.Element {
                 const customerRows = accountRows.filter(
                     (emp) => normalizeCustomerRecordType(emp.RecordType) === "CUSTOMER"
                 );
-                const customerLeadRows = accountRows.filter(
-                    (emp) => normalizeCustomerRecordType(emp.RecordType) === "CUSTOMER_LEAD"
-                );
 
                 return (
-                    <div style={{ display: "grid", gap: 16, height: "100%", minHeight: 0 }}>
+                    <div
+                        style={{
+                            height: "100%",
+                            minHeight: 0,
+                            display: "flex",
+                            flexDirection: "column",
+                        }}
+                    >
                         <EmployeeList
+                            key={`account-${activeCompanyId ?? "none"}`}
                             type="account"
                             employees={customerRows}
                             loading={loading}
                             error={error}
+                            onDeleteLead={async () => {
+                                await refreshListByType("account");
+                            }}
                             onAddLead={() => setActiveTab("addAccount")}
                             onAddLead2={() => setActiveTab("addAccountLead")}
                             addButtonLabelOverride="Add Customer"
                             secondaryAddButtonLabelOverride="Add Customer Lead"
                             showAnalyticsCards
                             showToolbar
-                            fillHeight={false}
-                            tableMaxHeight={380}
-                            onOpenLeadDetails={(leadId, origin) => {
-                                setSelectedLeadId(leadId);
-                                setSelectedLeadOrigin(origin ?? "Account");
-                                setActiveTab("leadDetails");
-                            }}
-                        />
-
-                        <div style={{ color: "#0F1F3D", fontWeight: 700, fontSize: 15, marginTop: -4 }}>
-                            Customer Lead Table
-                        </div>
-
-                        <EmployeeList
-                            type="account"
-                            employees={customerLeadRows}
-                            loading={loading}
-                            error={error}
-                            onAddLead={() => setActiveTab("addAccountLead")}
-                            showAnalyticsCards={false}
-                            showToolbar={false}
-                            fillHeight={false}
-                            tableMaxHeight={320}
+                            fillHeight
                             onOpenLeadDetails={(leadId, origin) => {
                                 setSelectedLeadId(leadId);
                                 setSelectedLeadOrigin(origin ?? "Account");
@@ -374,6 +436,7 @@ export default function WebPageClient(): JSX.Element {
                         />
                     </div>
                 );
+            }
 
             case "addLead":
                 return <AddLeadClient type="lead" onBack={() => handleTab("leads")} />;
@@ -408,17 +471,27 @@ export default function WebPageClient(): JSX.Element {
                     <LeadDetailsClient
                         leadId={selectedLeadId}
                         origin={selectedLeadOrigin ?? "leads"}
-
                         onBack={() => setActiveTab(selectedLeadOrigin ?? "leads")}
                         onEdit={(id?: string | number | null) => {
                             if (id != null) setSelectedLeadId(id);
                             setActiveTab("editLead");
                         }}
+                        onOpenLeadDetails={(nextLeadId, origin) => {
+                            setSelectedLeadId(nextLeadId);
+                            const normalizedOrigin =
+                              origin === "Prospect"
+                                ? "Prospect"
+                                : origin === "Account" || origin === "MasterAccount"
+                                  ? "Account"
+                                  : "leads";
+                            setSelectedLeadOrigin(normalizedOrigin);
+                            setActiveTab("leadDetails");
+                        }}
                     />
                 );
 
             case "reports":
-                return <ReportsClient />;
+                return <ReportsClient key={activeCompanyId ?? "none"} />;
 
             case "editLead":
                 return (
@@ -456,13 +529,14 @@ export default function WebPageClient(): JSX.Element {
                     height: "100vh",
                     borderRight: "1px solid rgba(248, 244, 239, 0.12)",
                     paddingTop: sidebarCollapsed ? 16 : 18,
-                    paddingBottom: 18,
+                    paddingBottom: sidebarCollapsed ? 12 : 16,
                     paddingLeft: sidebarCollapsed ? 8 : 18,
                     paddingRight: sidebarCollapsed ? 8 : 18,
                     background: "linear-gradient(180deg, #0F1F3D 0%, #1F3A68 100%)",
                     boxShadow: "8px 0 24px rgba(15, 31, 61, 0.18)",
-                    overflowY: "auto",
-                    overflowX: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
                     transition: "width 0.25s ease, padding 0.25s ease",
                     boxSizing: "border-box",
                     position: "fixed",
@@ -521,7 +595,14 @@ export default function WebPageClient(): JSX.Element {
                 )}
 
                 {/* NAVIGATION MENU */}
-                <nav>
+                <nav
+                    style={{
+                        flex: 1,
+                        minHeight: 0,
+                        overflowY: "auto",
+                        overflowX: "hidden",
+                    }}
+                >
                     <ul
                         style={{
                             listStyle: "none",
@@ -530,18 +611,10 @@ export default function WebPageClient(): JSX.Element {
                             display: "flex",
                             flexDirection: "column",
                             gap: 8,
-                            marginTop: sidebarCollapsed ? 70 : 20,
+                            marginTop: sidebarCollapsed ? 70 : 14,
                         }}
                     >
-                        {(
-                            [
-                                "dashboard",
-                                "leads",
-                                "Prospect",
-                                "Account",
-                                "reports",
-                            ] as TabKey[]
-                        ).map((tab) => {
+                        {primaryTabs.map((tab) => {
                             const label = getTabLabel(tab);
                             const active = sidebarActiveTab === tab;
                             const icon = tabIcons[tab];
@@ -560,11 +633,11 @@ export default function WebPageClient(): JSX.Element {
                                             borderRadius: 10,
                                             border: active
                                                 ? "1px solid #F26522"
-                                                : "1px solid rgba(248, 244, 239, 0.18)",
+                                                : "1px solid transparent",
                                             cursor: "pointer",
                                             background: active
                                                 ? "linear-gradient(135deg, #F26522 0%, #d95317 100%)"
-                                                : "rgba(248, 244, 239, 0.08)",
+                                                : "transparent",
                                             color: "#fff",
                                             minHeight: 44,
                                             justifyContent: sidebarCollapsed
@@ -606,43 +679,17 @@ export default function WebPageClient(): JSX.Element {
                             );
                         })}
                     </ul>
-                    {/* AI ASSISTANT BUTTON — add this after </ul> inside <nav> */}
-          <div style={{ marginTop: 16, paddingRight: 8 }}>
-            <button
-              className="ai-sidebar-btn"
-              onClick={() => setChatOpen(!chatOpen)}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                gap: sidebarCollapsed ? 0 : 12,
-                padding: sidebarCollapsed ? "10px 6px" : "10px 14px",
-                borderRadius: 8,
-                border: chatOpen ? "1px solid #12B7C9" : "1px solid rgba(18, 183, 201, 0.28)",
-                cursor: "pointer",
-                background: chatOpen
-                  ? "linear-gradient(135deg, #12B7C9 0%, #0d94a4 100%)"
-                  : "rgba(18, 183, 201, 0.12)",
-                color: chatOpen ? "#fff" : "#D9FBFF",
-                minHeight: 44,
-                justifyContent: sidebarCollapsed ? "center" : "flex-start",
-                fontWeight: 600,
-                fontSize: 14,
-                transition: "background 0.15s ease",
-              }}
-            >
-              <span style={{ fontSize: 18 }}>🤖</span>
-              {!sidebarCollapsed && (
-                <span>{chatOpen ? "Close AI" : "AI Assistant"}</span>
-              )}
-            </button>
-          </div>
-      
                 </nav>
-
-                {!sidebarCollapsed && (
-                    <div style={{ marginTop: 20, fontSize: 13, color: "rgba(248, 244, 239, 0.62)" }}></div>
-                )}
+                <div
+                    ref={setDroitBuddyHost}
+                    style={{
+                        flexShrink: 0,
+                        width: "100%",
+                        marginTop: "auto",
+                        paddingTop: sidebarCollapsed ? 10 : 16,
+                        paddingRight: sidebarCollapsed ? 0 : 8,
+                    }}
+                />
             </aside>
 
             {/* RIGHT SIDE */}
@@ -722,15 +769,40 @@ export default function WebPageClient(): JSX.Element {
 
                     <div
                         style={{
-                            fontWeight: 600,
-                            fontSize: 32,
+                            display: "flex",
+                            alignItems: "baseline",
+                            gap: 10,
                             flex: 1,
+                            minWidth: 0,
                             paddingLeft: 30,
-                            letterSpacing: "-0.02em",
-                            fontFamily: "var(--font-display)",
                         }}
                     >
-                        ACARSH
+                        <span
+                            style={{
+                                fontWeight: 600,
+                                fontSize: 32,
+                                letterSpacing: "-0.02em",
+                                fontFamily: "var(--font-display)",
+                                lineHeight: 1,
+                                flexShrink: 0,
+                            }}
+                        >
+                            ACARSH
+                        </span>
+                        <span
+                            style={{
+                                fontSize: 12,
+                                fontWeight: 500,
+                                lineHeight: 1.3,
+                                color: "rgba(255,255,255,0.78)",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                            }}
+                            title="Sales CRM - Adroitent Customer Acquisition and Relationship Management system"
+                        >
+                            Sales CRM - Adroitent Customer Acquisition and Relationship Management system
+                        </span>
                     </div>
 
                     <div
@@ -797,44 +869,25 @@ export default function WebPageClient(): JSX.Element {
                                 : undefined
                         }
                     >
+                        {companyAccessError ? (
+                            <div
+                                role="alert"
+                                style={{
+                                    marginBottom: 16,
+                                    padding: "12px 14px",
+                                    borderRadius: 10,
+                                    background: "#FEF2F2",
+                                    color: "#991B1B",
+                                    fontWeight: 600,
+                                }}
+                            >
+                                {companyAccessError}
+                            </div>
+                        ) : null}
                         {renderContent()}
                     </div>
                 </div>
             </main>
-            {/* AI ASSISTANT PANEL — fixed right side overlay */}
-<div
-  style={{
-    position: "fixed",
-    top: 0,
-    right: 0,
-    width: chatOpen ? 400 : 0,
-    height: "100vh",
-    transition: "width 0.3s ease",
-    overflow: "hidden",
-    zIndex: 10,
-    boxShadow: chatOpen ? "-4px 0 20px rgba(0,0,0,0.15)" : "none",
-  }}
->
-  {chatOpen && (
-  <CRMChatBot
-    onClose={() => setChatOpen(false)}
-    contextLeadId={selectedLeadId ?? null}
-    onAction={(action) => {
-      console.log("Agent action:", action);
-      // Refresh the current list when agent modifies data
-      if (
-        action.type === "lead_created" ||
-        action.type === "lead_updated" ||
-        action.type === "lead_deleted"
-      ) {
-        if (activeTab === "leads") fetchLeadsList();
-        else if (activeTab === "Prospect") fetchProspectsList();
-        else if (activeTab === "Account") fetchAccountList();
-      }
-    }}
-  />
-)}
-</div>
         </div>
     );
 }

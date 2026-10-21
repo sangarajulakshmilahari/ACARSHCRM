@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import json
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,6 +15,7 @@ from acarsh_mcp.catalog import get_lookup
 from acarsh_mcp.config import Settings
 from acarsh_mcp.db import Database
 from acarsh_mcp.errors import AccessDeniedError, ConflictError, NotFoundError, ValidationError
+from acarsh_mcp.lead_scoring import calculate_and_store_lead_score
 from acarsh_mcp.models import (
     ActivityDraft,
     ActivityUpdate,
@@ -35,6 +38,8 @@ from acarsh_mcp.models import (
     ReminderUpdate,
 )
 from acarsh_mcp.query import QueryService
+
+logger = logging.getLogger("acarsh_mcp")
 
 QUESTIONS = {
     "company_name": "What is the company or organization name?",
@@ -91,6 +96,86 @@ class CRMService:
         actor = self.actors.current()
         assert actor is not None
         return actor
+
+    def _require_company_id(
+        self,
+        conn: Connection,
+        actor: ActorContext,
+        parent_company_id: int | None = None,
+    ) -> int:
+        company_id = actor.company_id
+        if not company_id:
+            raise AccessDeniedError("Company membership required")
+        if parent_company_id is not None and int(parent_company_id) != int(company_id):
+            raise AccessDeniedError("Cross-company write is not allowed")
+        member = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM CompanyUsers
+                WHERE UserId = :user_id AND CompanyId = :company_id AND IsActive = 1
+                LIMIT 1
+                """
+            ),
+            {"user_id": actor.user_id, "company_id": company_id},
+        ).first()
+        if member is None:
+            raise AccessDeniedError("User is not a member of the requested company")
+        return int(company_id)
+
+    def _recalculate_lead_score(self, conn: Connection, lead_id: int) -> None:
+        try:
+            calculate_and_store_lead_score(conn, lead_id)
+        except Exception:
+            logger.exception("Lead score recalculation failed for lead_id=%s", lead_id)
+
+    def calculate_lead_score(self, lead_id: RecordReference) -> dict:
+        actor = self._actor()
+        with self.database.transaction() as conn:
+            resolved_lead_id = self._resolve_lead_reference(conn, lead_id, actor)
+            score_data = calculate_and_store_lead_score(conn, resolved_lead_id)
+            row = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT Score, Rating, Breakdown, CalculatedAt
+                        FROM LeadScores
+                        WHERE LeadId = :lead_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"lead_id": resolved_lead_id},
+                )
+                .mappings()
+                .first()
+            )
+        breakdown = score_data["breakdown"]
+        score = int(score_data["score"])
+        rating = str(score_data["rating"])
+        calculated_at = None
+        if row is not None:
+            score = int(row["Score"])
+            rating = str(row["Rating"])
+            calculated_at = row.get("CalculatedAt")
+            raw_breakdown = row.get("Breakdown")
+            if isinstance(raw_breakdown, str):
+                try:
+                    breakdown = json.loads(raw_breakdown)
+                except Exception:
+                    breakdown = score_data["breakdown"]
+            elif isinstance(raw_breakdown, dict):
+                breakdown = raw_breakdown
+        return {
+            "status": "ok",
+            "lead_id": resolved_lead_id,
+            "score": score,
+            "rating": rating,
+            "rating_label": (
+                "HOT 🔥" if rating == "HOT" else "WARM 🟠" if rating == "WARM" else "COLD 🔵"
+            ),
+            "breakdown": breakdown,
+            "calculated_at": calculated_at,
+        }
 
     @staticmethod
     def _ensure_lead_access(
@@ -602,6 +687,8 @@ class CRMService:
         return int(row["id"])
 
     def list_lookup(self, lookup_name: str) -> dict:
+        # Intentionally global catalog (statuses, roles, services, technologies).
+        # Not tenant-owned. Do not add CompanyId filters here.
         table, id_column, label_column = get_lookup(lookup_name)
         rows = self.database.fetch_all(
             f"SELECT {id_column} AS id, {label_column} AS name FROM {table} ORDER BY {label_column}"
@@ -625,16 +712,17 @@ class CRMService:
             )
             if not actor.is_manager and owner_id != actor_id:
                 raise AccessDeniedError("Sales Executives can only assign leads to themselves")
+            company_id = self._require_company_id(conn, actor)
 
             result = conn.execute(
                 text(
                     """
                     INSERT INTO Leads
                       (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes,
-                       OwnerId, AccountTypeId, StatusId, IsDeleted)
+                       OwnerId, AccountTypeId, StatusId, IsDeleted, CompanyId)
                     VALUES
                       (:company_name, :company_location, :lead_source, :lead_date, :notes,
-                       :owner_id, :account_type_id, :status_id, 0)
+                       :owner_id, :account_type_id, :status_id, 0, :company_id)
                     """
                 ),
                 {
@@ -646,6 +734,7 @@ class CRMService:
                     "owner_id": owner_id,
                     "account_type_id": account_type_id,
                     "status_id": status_id,
+                    "company_id": company_id,
                 },
             )
             lead_id = int(result.lastrowid)
@@ -656,15 +745,16 @@ class CRMService:
                     text(
                         """
                         INSERT INTO LeadContacts
-                          (LeadId, ContactName, ContactTitle, ContactRoleId, ContactLocation,
+                          (LeadId, CompanyId, ContactName, ContactTitle, ContactRoleId, ContactLocation,
                            ContactEmail, ContactPhone, LinkedInProfile, EmailSent)
                         VALUES
-                          (:lead_id, :name, :title, :role_id, :location,
+                          (:lead_id, :company_id, :name, :title, :role_id, :location,
                            :email, :phone, :linkedin_profile, 0)
                         """
                     ),
                     {
                         "lead_id": lead_id,
+                        "company_id": company_id,
                         "name": contact.name,
                         "title": contact.title,
                         "role_id": role_id,
@@ -674,6 +764,8 @@ class CRMService:
                         "linkedin_profile": contact.linkedin_profile,
                     },
                 )
+
+            self._recalculate_lead_score(conn, lead_id)
 
         self.audit.mutation(
             tool="create_lead",
@@ -735,6 +827,8 @@ class CRMService:
                 params,
             )
 
+            self._recalculate_lead_score(conn, resolved_lead_id)
+
         self.audit.mutation(
             tool="update_lead",
             entity="lead",
@@ -753,26 +847,29 @@ class CRMService:
         actor = self._actor()
         with self.database.transaction() as conn:
             lead_id = self._resolve_lead_reference(conn, draft.lead_id, actor)
+            company_id = self._require_company_id(conn, actor)
             role_id = self._resolve_lookup(conn, "contact_roles", draft.role)  # type: ignore[arg-type]
             result = conn.execute(
                 text(
                     """
                     INSERT INTO LeadContacts
-                      (LeadId, ContactName, ContactTitle, ContactRoleId, ContactLocation,
+                      (LeadId, CompanyId, ContactName, ContactTitle, ContactRoleId, ContactLocation,
                        ContactEmail, ContactPhone, LinkedInProfile, EmailSent)
                     VALUES
-                      (:lead_id, :name, :title, :role_id, :location,
+                      (:lead_id, :company_id, :name, :title, :role_id, :location,
                        :email, :phone, :linkedin_profile, 0)
                     """
                 ),
                 {
                     **draft.model_dump(exclude={"role"}),
                     "lead_id": lead_id,
+                    "company_id": company_id,
                     "role_id": role_id,
                     "linkedin_profile": draft.linkedin_profile,
                 },
             )
             contact_id = int(result.lastrowid)
+            self._recalculate_lead_score(conn, lead_id)
 
         self.audit.mutation(
             tool="add_contact",
@@ -835,6 +932,7 @@ class CRMService:
                 ),
                 params,
             )
+            self._recalculate_lead_score(conn, resolved_lead_id)
 
         self.audit.mutation(
             tool="update_contact",
@@ -871,6 +969,7 @@ class CRMService:
                 ),
                 {"lead_id": resolved_lead_id, "contact_id": resolved_contact_id},
             )
+            self._recalculate_lead_score(conn, resolved_lead_id)
         self.audit.mutation(
             tool="delete_contact",
             entity="contact",
@@ -904,15 +1003,16 @@ class CRMService:
                 text(
                     """
                     INSERT INTO LeadActivities
-                      (LeadId, ActivityType, ActivitySubject, ActivityDate, StatusId,
+                      (LeadId, CompanyId, ActivityType, ActivitySubject, ActivityDate, StatusId,
                        Notes, CreatedBy, ContactId)
                     VALUES
-                      (:lead_id, :activity_type, :subject, :activity_date, :status_id,
+                      (:lead_id, :company_id, :activity_type, :subject, :activity_date, :status_id,
                        :notes, :created_by, :contact_id)
                     """
                 ),
                 {
                     "lead_id": lead_id,
+                    "company_id": self._require_company_id(conn, actor),
                     "activity_type": draft.activity_type,
                     "subject": draft.subject,
                     "activity_date": draft.activity_date or datetime.now(UTC),
@@ -930,6 +1030,7 @@ class CRMService:
                 ),
                 {"status_id": status_id, "lead_id": lead_id},
             )
+            self._recalculate_lead_score(conn, lead_id)
 
         self.audit.mutation(
             tool="add_activity",
@@ -1001,6 +1102,7 @@ class CRMService:
                 ),
                 params,
             )
+            self._recalculate_lead_score(conn, lead_id)
 
         self.audit.mutation(
             tool="update_activity",
@@ -1030,15 +1132,16 @@ class CRMService:
                 text(
                     """
                     INSERT INTO LeadReminders
-                      (LeadId, ReminderDate, ReminderNote, IsCompleted,
+                      (LeadId, CompanyId, ReminderDate, ReminderNote, IsCompleted,
                        NotificationChannels, CreatedBy, Status)
                     VALUES
-                      (:lead_id, :reminder_date, :note, 0,
+                      (:lead_id, :company_id, :reminder_date, :note, 0,
                        :notification_channels, :created_by, :status)
                     """
                 ),
                 {
                     "lead_id": lead_id,
+                    "company_id": self._require_company_id(conn, actor),
                     "reminder_date": reminder_date_utc,
                     "note": draft.note,
                     "notification_channels": draft.notification_channels,
@@ -1209,6 +1312,7 @@ class CRMService:
                 text("UPDATE Leads SET IsDeleted = 1, ModifiedOn = NOW(6) WHERE LeadId = :lead_id"),
                 {"lead_id": resolved_lead_id},
             )
+            conn.execute(text("DELETE FROM LeadScores WHERE LeadId = :lead_id"), {"lead_id": resolved_lead_id})
         self.audit.mutation(
             tool="delete_lead",
             entity="lead",
@@ -1256,15 +1360,16 @@ class CRMService:
                 text(
                     """
                     INSERT INTO Opportunities
-                      (LeadId, ProjectId, ProbabilityId, ServiceId, EngagementId,
+                      (LeadId, CompanyId, ProjectId, ProbabilityId, ServiceId, EngagementId,
                        Opportunity_StatusId, IsDeleted, IsCompleted)
                     VALUES
-                      (:lead_id, :project_id, :probability_id, :service_id, :engagement_id,
+                      (:lead_id, :company_id, :project_id, :probability_id, :service_id, :engagement_id,
                        :status_id, 0, :is_completed)
                     """
                 ),
                 {
                     "lead_id": lead_id,
+                    "company_id": self._require_company_id(conn, actor),
                     "project_id": project_id,
                     "probability_id": probability_id,
                     "service_id": service_id,
@@ -1281,10 +1386,14 @@ class CRMService:
             for technology_id in technology_ids:
                 conn.execute(
                     text(
-                        "INSERT INTO Opportunity_categories (OpportunityId, SubCategoryId) "
-                        "VALUES (:opportunity_id, :technology_id)"
+                        "INSERT INTO Opportunity_categories (OpportunityId, CompanyId, SubCategoryId) "
+                        "VALUES (:opportunity_id, :company_id, :technology_id)"
                     ),
-                    {"opportunity_id": opportunity_id, "technology_id": technology_id},
+                    {
+                        "opportunity_id": opportunity_id,
+                        "company_id": self._require_company_id(conn, actor),
+                        "technology_id": technology_id,
+                    },
                 )
 
         self.audit.mutation(
@@ -1386,8 +1495,8 @@ class CRMService:
                 for technology_id in technology_ids:
                     conn.execute(
                         text(
-                            "INSERT INTO Opportunity_categories (OpportunityId, SubCategoryId) "
-                            "VALUES (:opportunity_id, :technology_id)"
+                            "INSERT INTO Opportunity_categories (OpportunityId, CompanyId, SubCategoryId) "
+                            "VALUES (:opportunity_id, :company_id, :technology_id)"
                         ),
                         {
                             "opportunity_id": resolved_opportunity_id,
@@ -1420,15 +1529,19 @@ class CRMService:
                     """
                     INSERT INTO Projects
                       (ProjectCode, ProjectName, ProjectDesc, KeyWork, ValueAdded,
-                       Deliverables, Challenges, Notes, StartDate, EndDate, CustomerId,
+                       Deliverables, Challenges, Notes, StartDate, EndDate, CustomerId, CompanyId,
                        TechStack, IsHidden, IsDeleted)
                     VALUES
                       (:code, :name, :description, :key_work, :value_added,
-                       :deliverables, :challenges, :notes, :start_date, :end_date, :customer_id,
+                       :deliverables, :challenges, :notes, :start_date, :end_date, :customer_id, :company_id,
                        :tech_stack, 0, 0)
                     """
                 ),
-                {**draft.model_dump(), "customer_id": customer_id},
+                {
+                    **draft.model_dump(),
+                    "customer_id": customer_id,
+                    "company_id": self._require_company_id(conn, actor),
+                },
             )
             project_id = int(result.lastrowid)
 
@@ -1509,22 +1622,23 @@ class CRMService:
         actor = self._actor()
         with self.database.transaction() as conn:
             opportunity_id = self._resolve_opportunity_reference(conn, draft.opportunity_id, actor)
+            company_id = self._require_company_id(conn, actor)
             result = conn.execute(
                 text(
                     """
                     INSERT INTO OpportunityContacts
-                      (OpportunityId, FullName, FirstName, LastName, PreferredName,
+                      (OpportunityId, CompanyId, FullName, FirstName, LastName, PreferredName,
                        JobTitle, Department, SeniorityLevel, CompanyName, WorkEmail,
                        PersonalEmail, DirectPhone, MobilePhone, OfficePhone,
                        LinkedInProfileUrl, IsDeleted)
                     VALUES
-                      (:opportunity_id, :full_name, :first_name, :last_name, :preferred_name,
+                      (:opportunity_id, :company_id, :full_name, :first_name, :last_name, :preferred_name,
                        :job_title, :department, :seniority_level, :company_name, :work_email,
                        :personal_email, :direct_phone, :mobile_phone, :office_phone,
                        :linkedin_profile, 0)
                     """
                 ),
-                {**draft.model_dump(), "opportunity_id": opportunity_id},
+                {**draft.model_dump(), "opportunity_id": opportunity_id, "company_id": company_id},
             )
             contact_id = int(result.lastrowid)
 
@@ -1642,19 +1756,21 @@ class CRMService:
         actor = self._actor()
         with self.database.transaction() as conn:
             project_id = self._resolve_project_reference(conn, draft.project_id, actor)
+            company_id = self._require_company_id(conn, actor)
             contact_type_id = self._resolve_lookup(conn, "contact_types", draft.contact_type)  # type: ignore[arg-type]
             result = conn.execute(
                 text(
                     """
                     INSERT INTO ProjectContacts
-                      (ProjectId, ContactName, Title, Email, Phone, ContactTypeId)
+                      (ProjectId, CompanyId, ContactName, Title, Email, Phone, ContactTypeId)
                     VALUES
-                      (:project_id, :name, :title, :email, :phone, :contact_type_id)
+                      (:project_id, :company_id, :name, :title, :email, :phone, :contact_type_id)
                     """
                 ),
                 {
                     **draft.model_dump(exclude={"contact_type"}),
                     "project_id": project_id,
+                    "company_id": company_id,
                     "contact_type_id": contact_type_id,
                 },
             )
@@ -1769,19 +1885,20 @@ class CRMService:
         actor = self._actor()
         with self.database.transaction() as conn:
             project_id = self._resolve_project_reference(conn, draft.project_id, actor)
+            company_id = self._require_company_id(conn, actor)
             result = conn.execute(
                 text(
                     """
                     INSERT INTO ProjectResources
-                      (ProjectId, EmployeeId, Title, ReportingManager, ReportingManagerTitle,
+                      (ProjectId, CompanyId, EmployeeId, Title, ReportingManager, ReportingManagerTitle,
                        StartDate, EndDate, BillingStartDate, BillingEndDate)
                     VALUES
-                      (:project_id, :employee_id, :title, :reporting_manager,
+                      (:project_id, :company_id, :employee_id, :title, :reporting_manager,
                        :reporting_manager_title, :start_date, :end_date,
                        :billing_start_date, :billing_end_date)
                     """
                 ),
-                {**draft.model_dump(), "project_id": project_id},
+                {**draft.model_dump(), "project_id": project_id, "company_id": company_id},
             )
             resource_id = int(result.lastrowid)
 

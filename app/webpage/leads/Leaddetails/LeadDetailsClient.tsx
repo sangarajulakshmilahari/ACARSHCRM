@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
 import { formatLocaleDate, formatLocaleDateTime } from "@/app/utils/dateTime";
 import {
@@ -9,12 +10,14 @@ import {
   convertLeadWithExistingFlow,
 } from "../convert-actions";
 import { Search, Wrench, Star, Package, AlertTriangle } from "lucide-react";
+import { useDroitControl } from "../../components/WebpageDroitHost";
 type Contact = {
   LeadContactID?: number;
   ContactName?: string;
   ContactEmail?: string;
   ContactPhone?: string;
   ContactTitle?: string;
+  ContactNotes?: string;
   ContactRoleName?: string;
   LinkedInProfile?: string;
   LinkedInRequestSent?: number | boolean;
@@ -248,6 +251,9 @@ type Lead = {
   CompanyLocation?: string;
   OwnerName?: string;
   StatusName?: string;
+  LeadScore?: number | null;
+  LeadScoreRating?: "HOT" | "WARM" | "COLD" | string | null;
+  LeadScoreBreakdown?: Record<string, any> | null;
   LeadNotes?: string | null;
   LeadDate?: string | number | Date;
   LeadSource?: string;
@@ -267,6 +273,10 @@ type LeadDetailsProps = {
   leadId?: number | string | null;
   onBack?: () => void;
   onEdit?: (leadId?: number | string | null) => void;
+  onOpenLeadDetails?: (
+    leadId: number | string,
+    origin?: OriginType
+  ) => void;
   origin?: OriginType;
 };
 
@@ -301,14 +311,38 @@ type OppContact = {
   LinkedInProfileUrl?: string;
 };
 
+type CustomerLeadContact = {
+  ContactName?: string | null;
+  ContactTitle?: string | null;
+  ContactEmail?: string | null;
+  ContactPhone?: string | null;
+  ContactRoleName?: string | null;
+};
+
+type CustomerLeadRow = {
+  LeadId: number;
+  CompanyName?: string | null;
+  CompanyLocation?: string | null;
+  LeadSource?: string | null;
+  StatusName?: string | null;
+  OwnerName?: string | null;
+  LeadDate?: string | null;
+  CreatedOn?: string | null;
+  LeadScore?: number | null;
+  LeadScoreRating?: string | null;
+  Contacts?: CustomerLeadContact[];
+};
+
 export default function LeadDetailsClient({
   leadId,
   onBack,
   onEdit,
+  onOpenLeadDetails,
   origin = "leads",
 }: LeadDetailsProps): JSX.Element {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { runDroitCommand } = useDroitControl();
   const originFromQuery = searchParams.get("origin") as OriginType | null;
   const finalOrigin = originFromQuery ?? origin;
   const [lead, setLead] = useState<Lead | null>(null);
@@ -373,6 +407,9 @@ export default function LeadDetailsClient({
   const [customerSowUploadLoading, setCustomerSowUploadLoading] = useState(false);
   const [customerSows, setCustomerSows] = useState<CustomerSowSummary[]>([]);
   const [customerSowMessage, setCustomerSowMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [customerLeadsLoading, setCustomerLeadsLoading] = useState(false);
+  const [customerLeadsError, setCustomerLeadsError] = useState<string | null>(null);
+  const [customerLeads, setCustomerLeads] = useState<CustomerLeadRow[]>([]);
   const [showCustomerSowEditModal, setShowCustomerSowEditModal] = useState(false);
   const [customerSowEditLoading, setCustomerSowEditLoading] = useState(false);
   const [customerSowEditSaving, setCustomerSowEditSaving] = useState(false);
@@ -490,6 +527,8 @@ export default function LeadDetailsClient({
     activityContactIdx !== null
       ? leadContacts[activityContactIdx] ?? null
       : null;
+  const selectedContact =
+    selectedContactIdx !== null ? leadContacts[selectedContactIdx] ?? null : null;
   const filteredActivityContacts = leadContacts
     .map((contact, originalIndex) => ({ contact, originalIndex }))
     .filter(({ contact }) =>
@@ -1082,6 +1121,36 @@ export default function LeadDetailsClient({
       setCustomerSows([]);
     } finally {
       setCustomerSowsLoading(false);
+    }
+  };
+
+  const fetchCustomerLeads = async () => {
+    if (!effectiveLeadId) {
+      setCustomerLeads([]);
+      setCustomerLeadsError(null);
+      setCustomerLeadsLoading(false);
+      return;
+    }
+
+    try {
+      setCustomerLeadsLoading(true);
+      setCustomerLeadsError(null);
+      const res = await fetch(`/api/leads/${Number(effectiveLeadId)}/customer-leads`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch customer leads");
+      }
+
+      setCustomerLeads(
+        Array.isArray(data?.customerLeads)
+          ? (data.customerLeads as CustomerLeadRow[])
+          : []
+      );
+    } catch (error: any) {
+      setCustomerLeads([]);
+      setCustomerLeadsError(error?.message || "Failed to fetch customer leads");
+    } finally {
+      setCustomerLeadsLoading(false);
     }
   };
 
@@ -2231,12 +2300,44 @@ export default function LeadDetailsClient({
 
   const leadIdFromQuery = searchParams.get("leadId");
 
+  // Prefer controlled props/query so opening another lead from this page
+  // (e.g. Customer Lead row click) reloads the existing Lead Details flow.
   const effectiveLeadId =
-    lead?.LeadId ??
-    leadId ??
+    (leadId != null && String(leadId).trim() !== "" && !isNaN(Number(leadId))
+      ? Number(leadId)
+      : null) ??
     (leadIdFromQuery && !isNaN(Number(leadIdFromQuery))
       ? Number(leadIdFromQuery)
+      : null) ??
+    (lead?.LeadId != null && !isNaN(Number(lead.LeadId))
+      ? Number(lead.LeadId)
       : null);
+
+  const openCustomerLeadDetails = (targetLeadId: number | string) => {
+    const nextId = Number(targetLeadId);
+    if (!Number.isFinite(nextId) || nextId <= 0) return;
+    if (effectiveLeadId != null && Number(effectiveLeadId) === nextId) return;
+
+    const nextOrigin: OriginType =
+      finalOrigin === "Account" ||
+      finalOrigin === "Prospect" ||
+      finalOrigin === "leads" ||
+      finalOrigin === "MasterAccount"
+        ? finalOrigin
+        : "Account";
+
+    if (onOpenLeadDetails) {
+      onOpenLeadDetails(nextId, nextOrigin === "MasterAccount" ? "Account" : nextOrigin);
+      return;
+    }
+
+    const originParam = encodeURIComponent(
+      nextOrigin === "MasterAccount" ? "Account" : nextOrigin
+    );
+    router.push(
+      `/webpage/leads/Leaddetails?leadId=${encodeURIComponent(String(nextId))}&origin=${originParam}`
+    );
+  };
 
   // NEW: helpers to pick label / back text
   const getBackLabel = () => {
@@ -2308,6 +2409,10 @@ export default function LeadDetailsClient({
 
   useEffect(() => {
     fetchLeadDetails();
+  }, [effectiveLeadId]);
+
+  useEffect(() => {
+    fetchCustomerLeads();
   }, [effectiveLeadId]);
 
   useEffect(() => {
@@ -2656,6 +2761,56 @@ export default function LeadDetailsClient({
     overflow: "hidden",
   };
 
+  const compactSectionCardStyle: React.CSSProperties = {
+    background: "#fff",
+    borderRadius: 12,
+    border: "1px solid #e6edf7",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
+    marginBottom: 18,
+    overflow: "hidden",
+  };
+
+  const compactSectionHeaderStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "10px 14px",
+    borderBottom: "1px solid #e8eef7",
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+  };
+
+  const compactTitleStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 30,
+  };
+
+  const compactCountBadgeStyle: React.CSSProperties = {
+    background: "#e8f1ff",
+    color: "#1f3a68",
+    borderRadius: 999,
+    fontSize: 12,
+    lineHeight: 1,
+    fontWeight: 700,
+    padding: "4px 8px",
+  };
+
+  const compactTableScrollStyle: React.CSSProperties = {
+    maxHeight: 270,
+    overflowY: "auto",
+    overflowX: "auto",
+  };
+
+  const compactThStyle: React.CSSProperties = {
+    ...thStyle,
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    padding: "9px 12px",
+  };
+
   const addBtn = {
     backgroundColor: "#F26522",
     color: "white",
@@ -2933,9 +3088,30 @@ export default function LeadDetailsClient({
               ...sectionTitle,
               borderBottom: "1px solid #e6e6e6",
               paddingBottom: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            Company Information
+            <span>Company Information</span>
+            {lead.LeadId ? (
+              <button
+                type="button"
+                onClick={() =>
+                  runDroitCommand({
+                    type: "research_company",
+                    contextLeadId: lead.LeadId as string | number,
+                  })
+                }
+                style={{
+                  ...secondaryBtnStyle,
+                  marginLeft: "auto",
+                }}
+              >
+                Research Company
+              </button>
+            ) : null}
           </div>
           <div style={{ marginBottom: 8 }}>
             <span style={contactRowLabel}>Company: </span>
@@ -2979,6 +3155,61 @@ export default function LeadDetailsClient({
               }}
             >
               {lead.StatusName}
+            </span>
+          </div>
+
+          <div style={{ marginBottom: 8 }}>
+            <span style={contactRowLabel}>Lead Score: </span>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 12,
+                  background:
+                    String(lead.LeadScoreRating || "COLD").toUpperCase() === "HOT"
+                      ? "#fff1f2"
+                      : String(lead.LeadScoreRating || "COLD").toUpperCase() === "WARM"
+                        ? "#fff7ed"
+                        : "#eff6ff",
+                  color:
+                    String(lead.LeadScoreRating || "COLD").toUpperCase() === "HOT"
+                      ? "#b91c1c"
+                      : String(lead.LeadScoreRating || "COLD").toUpperCase() === "WARM"
+                        ? "#c2410c"
+                        : "#1d4ed8",
+                  fontWeight: 700,
+                }}
+              >
+                {String(lead.LeadScoreRating || "COLD").toUpperCase() === "HOT"
+                  ? "HOT 🔥"
+                  : String(lead.LeadScoreRating || "COLD").toUpperCase() === "WARM"
+                    ? "WARM 🟠"
+                    : "COLD 🔵"}
+              </span>
+              <span style={{ fontWeight: 700 }}>{Number(lead.LeadScore ?? 0)}/100</span>
+            </span>
+          </div>
+
+          <div style={{ marginBottom: 8 }}>
+            <span style={contactRowLabel}>Score Breakdown: </span>
+            <span style={{ ...value, display: "inline-block", marginTop: 4 }}>
+              {Object.entries((lead.LeadScoreBreakdown || {}) as Record<string, any>).length
+                ? Object.entries((lead.LeadScoreBreakdown || {}) as Record<string, any>)
+                    .map(([key, item]) => {
+                      const earned = Number((item as any)?.earned ?? 0);
+                      const max = Number((item as any)?.max ?? 0);
+                      const label = key.replace(/_/g, " ");
+                      return `${label}: ${earned}/${max}`;
+                    })
+                    .join(" • ")
+                : "Not calculated"}
             </span>
           </div>
         </div>
@@ -3134,23 +3365,39 @@ export default function LeadDetailsClient({
                         </div>
                       )}
 
-                      {c.LinkedInProfile && (
-                        <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6, gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6, gap: 10 }}>
                           <div style={contactRowLabel}>LinkedIn:</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, color: "#F26522", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              <a
-                                href={`https://${c.LinkedInProfile}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={c.LinkedInProfile}
-                                style={{ color: "inherit", textDecoration: "none" }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {c.LinkedInProfile}
-                              </a>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                color: c.LinkedInProfile ? "#F26522" : "#94a3b8",
+                                marginBottom: 6,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {c.LinkedInProfile ? (
+                                <a
+                                  href={
+                                    /^https?:\/\//i.test(String(c.LinkedInProfile))
+                                      ? String(c.LinkedInProfile)
+                                      : `https://${c.LinkedInProfile}`
+                                  }
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={c.LinkedInProfile}
+                                  style={{ color: "inherit", textDecoration: "none" }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {String(c.LinkedInProfile).replace(/^https?:\/\//i, "")}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
                             </div>
-                            <div style={{ display: "flex", gap: 14 }}>
+                            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                               {(
                                 [
                                   { key: "LinkedInRequestSent" as const, label: "Request Sent" },
@@ -3160,26 +3407,54 @@ export default function LeadDetailsClient({
                                 <label
                                   key={key}
                                   onClick={(e) => e.stopPropagation()}
-                                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 500, color: "#555", cursor: "pointer", userSelect: "none" }}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    fontSize: 11,
+                                    fontWeight: 500,
+                                    color: "#555",
+                                    cursor: c.LeadContactID ? "pointer" : "not-allowed",
+                                    userSelect: "none",
+                                    opacity: c.LeadContactID ? 1 : 0.6,
+                                  }}
                                 >
                                   <input
                                     type="checkbox"
                                     checked={!!c[key]}
+                                    disabled={!c.LeadContactID}
                                     onChange={async (e) => {
                                       e.stopPropagation();
+                                      if (!c.LeadContactID || !lead?.LeadId) return;
                                       const newVal = e.target.checked;
-                                      setLead((prev) => prev ? ({
-                                        ...prev,
-                                        Contacts: (prev.Contacts || []).map((ct, idx) =>
-                                          idx === originalIndex ? { ...ct, [key]: newVal } : ct
-                                        ),
-                                      }) : prev);
+                                      // Keep accepted consistent with sent: accepting implies sent.
+                                      const nextPatch: Record<string, boolean> = { [key]: newVal };
+                                      if (key === "LinkedInRequestAccepted" && newVal) {
+                                        nextPatch.LinkedInRequestSent = true;
+                                      }
+                                      if (key === "LinkedInRequestSent" && !newVal) {
+                                        nextPatch.LinkedInRequestAccepted = false;
+                                      }
+                                      setLead((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              Contacts: (prev.Contacts || []).map((ct, idx) =>
+                                                idx === originalIndex ? { ...ct, ...nextPatch } : ct
+                                              ),
+                                            }
+                                          : prev
+                                      );
                                       await fetch(
                                         `/api/employees/leads/${lead.LeadId}/contacts/${c.LeadContactID}`,
-                                        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: newVal }) }
+                                        {
+                                          method: "PATCH",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify(nextPatch),
+                                        }
                                       );
                                     }}
-                                    style={{ accentColor: "#F26522", cursor: "pointer" }}
+                                    style={{ accentColor: "#F26522", cursor: c.LeadContactID ? "pointer" : "not-allowed" }}
                                   />
                                   {label}
                                 </label>
@@ -3187,7 +3462,75 @@ export default function LeadDetailsClient({
                             </div>
                           </div>
                         </div>
-                      )}
+
+                      <div style={{ marginTop: 8 }}>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#1f3a68",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Contact Notes:
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "#334155",
+                            background: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            lineHeight: 1.45,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {String(c.ContactNotes || "").trim() || "—"}
+                        </div>
+                      </div>
+
+                      {c.LeadContactID && lead.LeadId ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 8,
+                            marginTop: 10,
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              runDroitCommand({
+                                type: "research_contact",
+                                contextLeadId: lead.LeadId as string | number,
+                                contextContactId: c.LeadContactID as number,
+                              });
+                            }}
+                            style={primaryBtnStyle}
+                          >
+                            Research with DROIT
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              runDroitCommand({
+                                type: "meeting_brief",
+                                contextLeadId: lead.LeadId as string | number,
+                                contextContactId: c.LeadContactID as number,
+                              });
+                            }}
+                            style={secondaryBtnStyle}
+                          >
+                            Prepare for Meeting
+                          </button>
+                        </div>
+                      ) : null}
 
                       {/* Add Activity button – only on selected card */}
                       {isSelected && (
@@ -3243,26 +3586,23 @@ export default function LeadDetailsClient({
         <span style={{ marginLeft: 8 }}>{lead.LeadNotes || "—"}</span>
       </div>
 
-      {/* Activities */}
-      <div
-        style={{
-          ...sectionTitle,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <span>Activities</span>
-          <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
-            <button style={addBtn} onClick={openActivityFromGlobal}>
-              +
-            </button>
-          </div>
-        </div>
-        <button style={primaryBtn} onClick={() => setShowAddMeeting(true)}>
-          Schedule Meeting
-        </button>
+      {!customerLeadsLoading && !customerLeadsError && customerLeads.length > 0 && (
+        <>
+      <div style={{ ...sectionTitle, display: "flex", alignItems: "center", gap: 8 }}>
+        <span>Customer Leads</span>
+        <span
+          style={{
+            background: "#e8f1ff",
+            color: "#1f3a68",
+            borderRadius: 999,
+            fontSize: 12,
+            lineHeight: 1,
+            fontWeight: 700,
+            padding: "4px 8px",
+          }}
+        >
+          {customerLeads.length}
+        </span>
       </div>
 
       <div style={tableWrap}>
@@ -3271,15 +3611,308 @@ export default function LeadDetailsClient({
             width: "100%",
             borderCollapse: "separate",
             borderSpacing: 0,
+            minWidth: 980,
           }}
         >
           <thead>
             <tr>
-              <th style={{ ...thStyle, width: 200 }}>Activity Date</th>
-              <th style={{ ...thStyle, width: 120 }}>Mode</th>
-              <th style={{ ...thStyle }}>Notes</th>
-              <th style={{ ...thStyle, width: 160 }}>Contact</th>
-              <th style={{ ...thStyle, width: 120 }}>Status</th>
+              <th style={thStyle}>Owner</th>
+              <th style={thStyle}>Company</th>
+              <th style={thStyle}>Contacts</th>
+              <th style={thStyle}>Source</th>
+              <th style={thStyle}>Status</th>
+              <th style={thStyle}>Score</th>
+              <th style={thStyle}>Date of Entry</th>
+            </tr>
+          </thead>
+          <tbody>
+            {customerLeads.map((item, idx) => {
+                const contacts = Array.isArray(item.Contacts) ? item.Contacts : [];
+                const statusText = String(item.StatusName || "").trim();
+                const companyName = String(item.CompanyName || "").trim() || "-";
+                const leadScore = Number(item.LeadScore ?? 0);
+                const leadScoreRating = String(item.LeadScoreRating || "COLD").toUpperCase();
+                const entryDate = item.CreatedOn || item.LeadDate;
+
+                return (
+                  <tr
+                    key={`customer-lead-${item.LeadId}`}
+                    onClick={() => openCustomerLeadDetails(item.LeadId)}
+                    title="Open customer lead details"
+                    style={{
+                      cursor: "pointer",
+                      backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fbff",
+                    }}
+                  >
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      <div
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={item.OwnerName || ""}
+                      >
+                        {item.OwnerName || "-"}
+                      </div>
+                    </td>
+
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          color: "#1F3A68",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`${companyName} (LeadId ${item.LeadId})`}
+                      >
+                        {companyName}
+                      </div>
+                      {item.CompanyLocation ? (
+                        <div
+                          style={{
+                            color: "#6c7293",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            marginTop: 2,
+                          }}
+                        >
+                          <Image src="/location.png" alt="location" width={10} height={10} />
+                          <span>{item.CompanyLocation}</span>
+                        </div>
+                      ) : null}
+                    </td>
+
+                    <td style={tdStyle}>
+                      {contacts.length > 0 ? (
+                        <>
+                          {contacts.slice(0, 2).map((c, contactIndex) => (
+                            <div
+                              key={`${item.LeadId}-contact-${contactIndex}`}
+                              style={{
+                                padding: "2px 0",
+                                borderBottom:
+                                  contactIndex !== Math.min(contacts.length, 2) - 1
+                                    ? "0.5px solid #e0e0e0"
+                                    : "none",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {c.ContactName || "-"}
+                                {c.ContactRoleName ? (
+                                  <span style={{ color: "#6c7293", marginLeft: 6, fontWeight: 600 }}>
+                                    ({c.ContactRoleName})
+                                  </span>
+                                ) : null}
+                              </div>
+                              {c.ContactTitle ? (
+                                <div
+                                  style={{
+                                    color: "#6c7293",
+                                    fontWeight: 600,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  title={c.ContactTitle}
+                                >
+                                  {c.ContactTitle}
+                                </div>
+                              ) : null}
+                              {c.ContactEmail ? (
+                                <div
+                                  style={{
+                                    color: "#6c7293",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    minWidth: 0,
+                                  }}
+                                >
+                                  <Image src="/email.png" alt="email" width={11} height={11} />
+                                  <a
+                                    href={`mailto:${c.ContactEmail}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      color: "#6c7293",
+                                      textDecoration: "none",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {c.ContactEmail}
+                                  </a>
+                                </div>
+                              ) : null}
+                              {c.ContactPhone ? (
+                                <div
+                                  style={{
+                                    color: "#6c7293",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                  }}
+                                >
+                                  <Image src="/call.png" alt="call" width={10} height={10} />
+                                  <a
+                                    href={`tel:${c.ContactPhone}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ color: "inherit", textDecoration: "none" }}
+                                  >
+                                    {c.ContactPhone}
+                                  </a>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                          {contacts.length > 2 ? (
+                            <div style={{ marginTop: 4, color: "#3a77e3", fontWeight: 600 }}>
+                              +{contacts.length - 2} more
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </td>
+
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      <div
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={item.LeadSource || ""}
+                      >
+                        {item.LeadSource || "-"}
+                      </div>
+                    </td>
+
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      {statusText ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            maxWidth: "100%",
+                            padding: "4px 10px",
+                            borderRadius: 12,
+                            border: "1px solid #dbe7ff",
+                            background: "#edf4ff",
+                            color: "#1e40af",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={statusText}
+                        >
+                          {statusText}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "3px 8px",
+                            borderRadius: 12,
+                            fontWeight: 700,
+                            fontSize: 10,
+                            width: "fit-content",
+                            background:
+                              leadScoreRating === "HOT"
+                                ? "#fff1f2"
+                                : leadScoreRating === "WARM"
+                                  ? "#fff7ed"
+                                  : "#eff6ff",
+                            color:
+                              leadScoreRating === "HOT"
+                                ? "#b91c1c"
+                                : leadScoreRating === "WARM"
+                                  ? "#c2410c"
+                                  : "#1d4ed8",
+                            border:
+                              leadScoreRating === "HOT"
+                                ? "1px solid #fecdd3"
+                                : leadScoreRating === "WARM"
+                                  ? "1px solid #fed7aa"
+                                  : "1px solid #bfdbfe",
+                          }}
+                        >
+                          {leadScoreRating === "HOT"
+                            ? "HOT 🔥"
+                            : leadScoreRating === "WARM"
+                              ? "WARM 🟠"
+                              : "COLD 🔵"}
+                        </span>
+                        <span style={{ fontWeight: 700, color: "#0f172a", fontSize: 11 }}>
+                          {Number.isFinite(leadScore) ? leadScore : 0}/100
+                        </span>
+                      </div>
+                    </td>
+
+                    <td style={{ ...tdStyle, verticalAlign: "middle" }}>
+                      {entryDate
+                        ? formatLocaleDate(entryDate, undefined, "-")
+                        : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+        </>
+      )}
+
+      {/* Activities */}
+      <section style={compactSectionCardStyle}>
+        <div style={compactSectionHeaderStyle}>
+          <div style={{ ...compactTitleStyle, fontSize: 16, fontWeight: 700, color: "#1e293b" }}>
+            <span>Activities</span>
+            <span style={compactCountBadgeStyle}>{(lead.Activities || []).length}</span>
+            <button style={addBtn} onClick={openActivityFromGlobal}>
+              +
+            </button>
+          </div>
+          <button style={{ ...primaryBtn, padding: "7px 12px", fontSize: 13 }} onClick={() => setShowAddMeeting(true)}>
+            Schedule Meeting
+          </button>
+        </div>
+
+        <div style={compactTableScrollStyle}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+              minWidth: 920,
+            }}
+          >
+          <thead>
+            <tr>
+              <th style={{ ...compactThStyle, width: 200 }}>Activity Date</th>
+              <th style={{ ...compactThStyle, width: 120 }}>Mode</th>
+              <th style={{ ...compactThStyle }}>Notes</th>
+              <th style={{ ...compactThStyle, width: 160 }}>Contact</th>
+              <th style={{ ...compactThStyle, width: 120 }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -3426,32 +4059,37 @@ export default function LeadDetailsClient({
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </section>
 
       {/* Reminders */}
-      <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
-        Reminders
-        <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
-          <button style={addBtn} onClick={() => setShowAddReminder(true)}>
-            + 
-          </button>
+      <section style={compactSectionCardStyle}>
+        <div style={compactSectionHeaderStyle}>
+          <div style={{ ...compactTitleStyle, fontSize: 16, fontWeight: 700, color: "#1e293b" }}>
+            <span>Reminders</span>
+            <span style={compactCountBadgeStyle}>{(lead.Reminders || []).length}</span>
+            <button style={addBtn} onClick={() => setShowAddReminder(true)}>
+              +
+            </button>
+          </div>
         </div>
-      </div>
-      <div style={tableWrap}>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "separate",
-            borderSpacing: 0,
-          }}
-        >
+
+        <div style={compactTableScrollStyle}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+              minWidth: 860,
+            }}
+          >
           <thead>
             <tr>
-              <th style={{ ...thStyle, width: 180 }}>Reminder Date</th>
-              <th style={{ ...thStyle }}>Notes</th>
-              <th style={{ ...thStyle, width: 140 }}>Status</th>
-              <th style={{ ...thStyle, width: 140 }}>Notification</th>
+              <th style={{ ...compactThStyle, width: 180 }}>Reminder Date</th>
+              <th style={{ ...compactThStyle }}>Notes</th>
+              <th style={{ ...compactThStyle, width: 140 }}>Status</th>
+              <th style={{ ...compactThStyle, width: 140 }}>Notification</th>
             </tr>
           </thead>
           <tbody>
@@ -3532,34 +4170,40 @@ export default function LeadDetailsClient({
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </section>
 
       {/* Lead Opportunities */}
-      <div style={{ ...sectionTitle, display: "flex", alignItems: "center" }}>
-        Opportunities
-        <button style={addBtn} onClick={handleAddOpportunityClick}>
-          +
-        </button>
-      </div>
+      <section style={compactSectionCardStyle}>
+        <div style={compactSectionHeaderStyle}>
+          <div style={{ ...compactTitleStyle, fontSize: 16, fontWeight: 700, color: "#1e293b" }}>
+            <span>Opportunities</span>
+            <span style={compactCountBadgeStyle}>{(lead.Opportunities || []).length}</span>
+            <button style={addBtn} onClick={handleAddOpportunityClick}>
+              +
+            </button>
+          </div>
+        </div>
 
-      <div style={tableWrap}>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "separate",
-            borderSpacing: 0,
-          }}
-        >
+        <div style={compactTableScrollStyle}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+              minWidth: 1200,
+            }}
+          >
           <thead>
             <tr>
-              <th style={{ ...thStyle, width: 180 }}>Project</th>
-              <th style={{ ...thStyle, width: 150 }}>Service</th>
-              <th style={{ ...thStyle, width: 120 }}>Probability</th>
-              <th style={{ ...thStyle, width: 200 }}>Status</th>
-              <th style={{ ...thStyle, width: 200 }}>Engagement Model</th>
-              <th style={{ ...thStyle, width: 250 }}>Technology</th>
-              <th style={{ ...thStyle, width: 250 }}>Opportunity Contact</th>
+              <th style={{ ...compactThStyle, width: 180 }}>Project</th>
+              <th style={{ ...compactThStyle, width: 150 }}>Service</th>
+              <th style={{ ...compactThStyle, width: 120 }}>Probability</th>
+              <th style={{ ...compactThStyle, width: 200 }}>Status</th>
+              <th style={{ ...compactThStyle, width: 200 }}>Engagement Model</th>
+              <th style={{ ...compactThStyle, width: 250 }}>Technology</th>
+              <th style={{ ...compactThStyle, width: 250 }}>Opportunity Contact</th>
             </tr>
           </thead>
 
@@ -3612,8 +4256,9 @@ export default function LeadDetailsClient({
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </section>
 
       {(lead?.AccountTypeId ?? 0) >= 30 && (
         <>

@@ -6,9 +6,27 @@ import type { ResolvedAuthUser } from "@/app/api/lib/auth";
 import type { AgentMessage, PendingWrite, ToolLog } from "./agent";
 
 export type StoredChatMessage = {
+  messageId: number;
   role: "user" | "assistant";
   content: string;
   toolCalls: ToolLog[];
+  attachments: StoredAttachment[];
+};
+
+export type StoredAttachment = {
+  attachmentId: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  uploadRef: string;
+  uploadedAt: string;
+};
+
+type NewUserAttachment = {
+  originalFileName: string;
+  fileType: string;
+  fileSize: number;
+  fileBuffer: Buffer;
 };
 
 export type ConversationSummary = {
@@ -78,6 +96,23 @@ async function createTables() {
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS AIChatMessageAttachments (
+      AttachmentId BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      MessageId BIGINT UNSIGNED NOT NULL,
+      OriginalFileName VARCHAR(260) NOT NULL,
+      FileType VARCHAR(120) NOT NULL,
+      FileSizeBytes INT UNSIGNED NOT NULL,
+      StorageRef VARCHAR(190) NOT NULL,
+      FileData LONGBLOB NOT NULL,
+      UploadedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      INDEX IX_AIChatMessageAttachments_Message (MessageId),
+      CONSTRAINT FK_AIChatMessageAttachments_Message
+        FOREIGN KEY (MessageId)
+        REFERENCES AIChatMessages (MessageId)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
 
 export async function ensureChatStorage() {
@@ -98,9 +133,9 @@ export async function createConversation(
   const pool = await getPool();
   await pool.execute(
     `INSERT INTO AIChatConversations
-      (ConversationId, UserId, RoleId, Title, PendingWritesJson)
-     VALUES (?, ?, ?, 'New conversation', '[]')`,
-    [id, user.userId, user.roleId],
+      (ConversationId, UserId, RoleId, CompanyId, Title, PendingWritesJson)
+     VALUES (?, ?, ?, ?, 'New conversation', '[]')`,
+    [id, user.userId, user.roleId, user.companyId],
   );
   return {
     id,
@@ -125,10 +160,10 @@ export async function listConversations(
   const [rows]: any = await pool.execute(
     `SELECT ConversationId, Title, UpdatedAt
      FROM AIChatConversations
-     WHERE UserId = ? AND RoleId = ? AND IsArchived = 0
+     WHERE UserId = ? AND RoleId = ? AND CompanyId <=> ? AND IsArchived = 0
      ORDER BY UpdatedAt DESC
      LIMIT ${safeLimit}`,
-    [user.userId, user.roleId],
+    [user.userId, user.roleId, user.companyId],
   );
   return (rows || []).map((row: any) => ({
     id: String(row.ConversationId),
@@ -146,9 +181,9 @@ export async function loadConversation(
   const [conversationRows]: any = await pool.execute(
     `SELECT ConversationId, UserId, RoleId, Title, PendingWritesJson
      FROM AIChatConversations
-     WHERE ConversationId = ? AND UserId = ? AND RoleId = ? AND IsArchived = 0
+     WHERE ConversationId = ? AND UserId = ? AND RoleId = ? AND CompanyId <=> ? AND IsArchived = 0
      LIMIT 1`,
-    [conversationId, user.userId, user.roleId],
+    [conversationId, user.userId, user.roleId, user.companyId],
   );
   if (!conversationRows?.length) return null;
 
@@ -164,6 +199,34 @@ export async function loadConversation(
      ORDER BY MessageId ASC`,
     [conversationId],
   );
+  const messageIds = (messageRows || [])
+    .map((message: any) => Number(message.MessageId || 0))
+    .filter((value: number) => Number.isInteger(value) && value > 0);
+  const attachmentsByMessageId = new Map<number, StoredAttachment[]>();
+  if (messageIds.length > 0) {
+    const placeholders = messageIds.map(() => "?").join(",");
+    const [attachmentRows]: any = await pool.execute(
+      `SELECT AttachmentId, MessageId, OriginalFileName, FileType, FileSizeBytes, StorageRef, UploadedAt
+       FROM AIChatMessageAttachments
+       WHERE MessageId IN (${placeholders})
+       ORDER BY AttachmentId ASC`,
+      messageIds,
+    );
+    for (const row of attachmentRows || []) {
+      const messageId = Number(row.MessageId || 0);
+      if (!messageId) continue;
+      const current = attachmentsByMessageId.get(messageId) || [];
+      current.push({
+        attachmentId: Number(row.AttachmentId || 0),
+        fileName: String(row.OriginalFileName || ""),
+        fileType: String(row.FileType || "application/octet-stream"),
+        fileSize: Number(row.FileSizeBytes || 0),
+        uploadRef: String(row.StorageRef || ""),
+        uploadedAt: row.UploadedAt ? new Date(row.UploadedAt).toISOString() : new Date().toISOString(),
+      });
+      attachmentsByMessageId.set(messageId, current);
+    }
+  }
   const row = conversationRows[0];
   return {
     id: String(row.ConversationId),
@@ -174,9 +237,11 @@ export async function loadConversation(
     messages: (messageRows || [])
       .filter((message: any) => message.Role === "user" || message.Role === "assistant")
       .map((message: any) => ({
+        messageId: Number(message.MessageId || 0),
         role: message.Role as "user" | "assistant",
         content: String(message.Content || ""),
         toolCalls: parseJsonArray<ToolLog>(message.ToolCallsJson),
+        attachments: attachmentsByMessageId.get(Number(message.MessageId || 0)) || [],
       })),
   };
 }
@@ -197,6 +262,7 @@ export async function saveExchange(options: {
   assistantReply: string;
   toolCalls: ToolLog[];
   pendingWrites: PendingWrite[];
+  userAttachments?: NewUserAttachment[];
 }) {
   await ensureChatStorage();
   const pool = await getPool();
@@ -206,19 +272,52 @@ export async function saveExchange(options: {
     const [ownership]: any = await connection.execute(
       `SELECT ConversationId, Title
        FROM AIChatConversations
-       WHERE ConversationId = ? AND UserId = ? AND RoleId = ? AND IsArchived = 0
+       WHERE ConversationId = ? AND UserId = ? AND RoleId = ? AND CompanyId <=> ? AND IsArchived = 0
        FOR UPDATE`,
-      [options.conversationId, options.user.userId, options.user.roleId],
+      [options.conversationId, options.user.userId, options.user.roleId, options.user.companyId],
     );
     if (!ownership?.length) throw new Error("Conversation is unavailable");
 
+    const [userInsert]: any = await connection.execute(
+      `INSERT INTO AIChatMessages (ConversationId, CompanyId, Role, Content, ToolCallsJson)
+       VALUES (?, ?, 'user', ?, '[]')`,
+      [options.conversationId, options.user.companyId, options.userMessage],
+    );
+    const userMessageId = Number(userInsert?.insertId || 0);
+    if (userMessageId > 0 && Array.isArray(options.userAttachments) && options.userAttachments.length) {
+      for (const attachment of options.userAttachments) {
+        const [attachmentInsert]: any = await connection.execute(
+          `INSERT INTO AIChatMessageAttachments
+            (MessageId, CompanyId, OriginalFileName, FileType, FileSizeBytes, StorageRef, FileData)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userMessageId,
+            options.user.companyId,
+            attachment.originalFileName,
+            attachment.fileType,
+            attachment.fileSize,
+            "pending",
+            attachment.fileBuffer,
+          ],
+        );
+        const attachmentId = Number(attachmentInsert?.insertId || 0);
+        if (attachmentId > 0) {
+          await connection.execute(
+            `UPDATE AIChatMessageAttachments
+             SET StorageRef = ?
+             WHERE AttachmentId = ?`,
+            [`db://ai-chat-message-attachments/${attachmentId}`, attachmentId],
+          );
+        }
+      }
+    }
+
     await connection.execute(
-      `INSERT INTO AIChatMessages (ConversationId, Role, Content, ToolCallsJson)
-       VALUES (?, 'user', ?, '[]'), (?, 'assistant', ?, ?)`,
+      `INSERT INTO AIChatMessages (ConversationId, CompanyId, Role, Content, ToolCallsJson)
+       VALUES (?, ?, 'assistant', ?, ?)`,
       [
         options.conversationId,
-        options.userMessage,
-        options.conversationId,
+        options.user.companyId,
         options.assistantReply,
         JSON.stringify(options.toolCalls),
       ],

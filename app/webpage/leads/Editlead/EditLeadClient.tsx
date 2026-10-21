@@ -9,6 +9,7 @@ type Contact = {
   ContactTitle?: string;
   ContactRoleName?: string;
   ContactPhone?: string;
+  ContactNotes?: string;
   LinkedInProfile?: string;
   LinkedInRequestSent?: boolean;
   LinkedInRequestAccepted?: boolean;
@@ -69,6 +70,7 @@ export default function EditLeadClient({
         ContactTitle: "",
         ContactRoleName: "Decision Maker",
         ContactPhone: "",
+        ContactNotes: "",
       },
     ],
     LeadNotes: "",
@@ -86,7 +88,8 @@ export default function EditLeadClient({
     basic: boolean;
     outreach: boolean;
     role: boolean;
-  }>({ basic: true, outreach: true, role: true });
+    notes: boolean;
+  }>({ basic: true, outreach: true, role: true, notes: true });
 
   // Fetch lead details when effectiveLeadId changes
   useEffect(() => {
@@ -199,6 +202,7 @@ export default function EditLeadClient({
           ContactTitle: "",
           ContactRoleName: "Decision Maker",
           ContactPhone: "",
+          ContactNotes: "",
         },
       ];
       setSelectedContactIndex(nextContacts.length - 1);
@@ -898,6 +902,46 @@ export default function EditLeadClient({
                         <option>Technical</option>
                         <option>Finance</option>
                       </select>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSections((prev) => ({ ...prev, notes: !prev.notes }))
+                    }
+                    style={sectionToggleButton}
+                  >
+                    <span>{expandedSections.notes ? "▾" : "▸"}</span> Contact Notes
+                  </button>
+                  {expandedSections.notes && (
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ ...labelStyle, fontWeight: 600 }}>Notes</label>
+                      <textarea
+                        style={{
+                          width: "100%",
+                          minHeight: 90,
+                          padding: "12px 14px",
+                          borderRadius: 6,
+                          border: "1px solid #e0e3e6",
+                          resize: "vertical",
+                          fontSize: 14,
+                          boxSizing: "border-box",
+                          background: "#fff",
+                          fontFamily: "inherit",
+                        }}
+                        value={selectedContact.ContactNotes ?? ""}
+                        onChange={(e) =>
+                          updateContact(
+                            selectedContactIndex,
+                            "ContactNotes",
+                            e.target.value
+                          )
+                        }
+                        placeholder="Additional notes about this contact..."
+                      />
                     </div>
                   )}
                 </div>

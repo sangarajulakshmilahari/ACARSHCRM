@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/config/db";
+import { getAuthUser } from "@/app/api/lib/auth";
+import { canUserViewLeadById } from "@/app/api/lib/lead-access";
+import { loadRecordCompanyId, resolveWriteCompanyId } from "@/app/api/lib/company-tenancy";
+import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
+
+const deps = {
+  getPool,
+  getAuthUser,
+  canUserViewLeadById,
+};
 
 /* ----------------------------------------------------
    POST → CREATE NEW OPPORTUNITY
@@ -9,10 +19,25 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await deps.getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const leadId = Number(params.leadID);
   if (isNaN(leadId)) {
     return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
   }
+
+  const pool = await deps.getPool();
+  const hasLeadAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+  if (!hasLeadAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const companyId = resolveWriteCompanyId(
+    authUser.companyId,
+    await loadRecordCompanyId(pool, "lead", leadId)
+  );
 
   const {
     projectId,
@@ -39,7 +64,6 @@ export async function POST(
     );
   }
 
-  const pool = await getPool();
   let conn: any;
   const normalizedProjectId =
     projectId !== undefined && projectId !== null && projectId !== ""
@@ -84,6 +108,7 @@ export async function POST(
       INSERT INTO Opportunities
       (
         LeadId,
+        CompanyId,
         ProjectId,
         ServiceId,
         ProbabilityId,
@@ -93,10 +118,11 @@ export async function POST(
         CreatedOn,
         IsDeleted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 0)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 0)
       `,
       [
         leadId,
+        companyId,
         normalizedProjectId,
         serviceId,
         probabilityId,
@@ -153,14 +179,16 @@ export async function POST(
       await conn.query(
         `
         INSERT INTO Opportunity_categories
-        (OpportunityId, SubCategoryId)
-        VALUES (?, ?)
+        (OpportunityId, CompanyId, SubCategoryId)
+        VALUES (?, ?, ?)
         `,
-        [OpportunityId, subCategoryId]
+        [OpportunityId, companyId, subCategoryId]
       );
     }
 
     await conn.commit();
+
+    await calculateAndStoreLeadScore(pool, leadId);
 
     /* 4 RETURN FULL ROW */
     const [rows]: any = await pool.query(
@@ -189,6 +217,11 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await deps.getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const {
     OpportunityId,
     projectId,
@@ -216,7 +249,7 @@ export async function PUT(
     );
   }
 
-  const pool = await getPool();
+  const pool = await deps.getPool();
   let conn: any;
   const leadId = Number(params.leadID);
   const normalizedProjectId =
@@ -234,6 +267,15 @@ export async function PUT(
   if (isNaN(leadId)) {
     return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
   }
+
+  const hasLeadAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+  if (!hasLeadAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const companyId = resolveWriteCompanyId(
+    authUser.companyId,
+    await loadRecordCompanyId(pool, "lead", leadId)
+  );
 
   try {
     conn = await pool.getConnection();
@@ -338,10 +380,10 @@ export async function PUT(
       await conn.query(
         `
         INSERT INTO Opportunity_categories
-        (OpportunityId, SubCategoryId)
-        VALUES (?, ?)
+        (OpportunityId, CompanyId, SubCategoryId)
+        VALUES (?, ?, ?)
         `,
-        [OpportunityId, subCategoryId]
+        [OpportunityId, companyId, subCategoryId]
       );
     }
 
@@ -376,6 +418,8 @@ export async function PUT(
 
     await conn.commit();
 
+    await calculateAndStoreLeadScore(pool, leadId);
+
     /* 5 RETURN UPDATED ROW */
     const [rows]: any = await pool.query(
       getOpportunitySelectQuery(),
@@ -403,6 +447,22 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { leadID: string } }
 ) {
+  const authUser = await deps.getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const leadId = Number(params.leadID);
+  if (isNaN(leadId)) {
+    return NextResponse.json({ error: "Invalid Lead ID" }, { status: 400 });
+  }
+
+  const pool = await deps.getPool();
+  const hasLeadAccess = await deps.canUserViewLeadById(pool, authUser, leadId);
+  if (!hasLeadAccess) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
   const OpportunityId = Number(searchParams.get("OpportunityId"));
 
@@ -414,8 +474,6 @@ export async function GET(
   }
 
   try {
-    const pool = await getPool();
-
     const [rows]: any = await pool.query(
       `
       SELECT
