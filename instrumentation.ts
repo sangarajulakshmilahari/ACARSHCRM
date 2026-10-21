@@ -1,4 +1,5 @@
 import { startReminderScheduler } from "./app/api/lib/reminder-scheduler";
+import { startEmailScheduler } from "./app/api/lib/email-scheduler";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") {
@@ -6,5 +7,6 @@ export async function register() {
   }
 
   startReminderScheduler();
+  startEmailScheduler();
 }
 

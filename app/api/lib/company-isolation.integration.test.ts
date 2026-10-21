@@ -14,6 +14,7 @@ import {
   shouldShowCompanySelector,
 } from "./company-tenancy";
 import { buildLeadOwnerVisibilityClause } from "./lead-access";
+import { insertEmailEventForEmail } from "./email-events-write";
 
 const ISOLATION_DB = "acarsh_isolation_test";
 const FORBIDDEN_DB = "acarsh_db";
@@ -257,6 +258,47 @@ test("SOW download is company scoped", async () => {
     [2, 11]
   );
   assert.equal(denied.length, 0);
+});
+
+test("tracking events inherit parent email company", async () => {
+  await insertEmailEventForEmail({
+    poolOrConn: pool,
+    emailId: 500,
+    eventType: "OPEN",
+    uniqueByEventType: true,
+    metadata: { source: "pixel" },
+  });
+  const [events]: any = await pool.query(`SELECT EmailId, CompanyId, EventType FROM email_events WHERE EmailId = 500`);
+  assert.equal(Number(events[0].CompanyId), 11);
+
+  await pool.query(
+    `
+      INSERT INTO email_tracked_links (EmailId, CompanyId, UrlHash, DestinationUrl)
+      SELECT e.EmailId, e.CompanyId, ?, ?
+      FROM emails e
+      WHERE e.EmailId = ? AND e.CompanyId IS NOT NULL
+    `,
+    ["abc", "https://example.com", 500]
+  );
+  const [links]: any = await pool.query(
+    `
+      SELECT t.CompanyId
+      FROM email_tracked_links t
+      INNER JOIN emails e ON e.EmailId = t.EmailId AND e.CompanyId IS NOT NULL
+      WHERE t.EmailId = 500
+    `
+  );
+  assert.equal(Number(links[0].CompanyId), 11);
+
+  const [cross]: any = await pool.query(
+    `
+      SELECT t.TrackedLinkId
+      FROM email_tracked_links t
+      INNER JOIN emails e ON e.EmailId = t.EmailId
+      WHERE t.EmailId = 500 AND e.CompanyId = 22
+    `
+  );
+  assert.equal(cross.length, 0);
 });
 
 test("website intake accepts only an active configured company", async () => {

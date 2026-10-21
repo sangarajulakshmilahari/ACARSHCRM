@@ -26,5 +26,32 @@ export async function GET() {
     maxAge: 0,
   });
 
+  // Clear Microsoft Graph delegated-session cookies (Phase 5A)
+  res.cookies.set("graph_access_token", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("graph_refresh_token", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("graph_expires_at", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("graph_user_principal", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("graph_oauth_state", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+
   return res;
 }

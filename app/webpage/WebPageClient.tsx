@@ -19,6 +19,9 @@ import AddLeadClient from "./leads/addleed/AddLeadClient";
 import LeadDetailsClient from "./leads/Leaddetails/LeadDetailsClient";
 import EditLeadClient from "./leads/Editlead/EditLeadClient";
 import ReportsClient from "./reports/ReportsClient";
+import EmailTemplatesClient from "./email-templates/EmailTemplatesClient";
+import EmailHistoryClient from "./email-history/EmailHistoryClient";
+import EmailSequencesClient from "./email-sequences/EmailSequencesClient";
 
 import { useDroitLayout } from "./components/WebpageDroitHost";
 
@@ -34,6 +37,9 @@ type TabKey =
     | "leadDetails"
     | "Account"
     | "reports"
+    | "emailHistory"
+    | "emailTemplates"
+    | "emailSequences"
     | "editLead";
 
 type SidebarIconProps = {
@@ -66,6 +72,9 @@ async function fetchEmployeeList(endpoint: string): Promise<Employee[]> {
 
 function getTabLabel(tab: TabKey): string {
     if (tab === "Account") return "Customer";
+    if (tab === "emailHistory") return "Email History";
+    if (tab === "emailTemplates") return "Email Templates";
+    if (tab === "emailSequences") return "Email Sequences";
     return tab[0].toUpperCase() + tab.slice(1);
 }
 
@@ -101,6 +110,7 @@ export default function WebPageClient(): JSX.Element {
         "leads" | "Prospect" | "Account" | null
     >(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [engageExpanded, setEngageExpanded] = useState(true);
     const [droitBuddyHost, setDroitBuddyHost] = useState<HTMLDivElement | null>(null);
     const [loggedInUserName, setLoggedInUserName] = useState<string | null>(null);
     const [activeCompanyId, setActiveCompanyId] = useState<number | null>(null);
@@ -140,6 +150,9 @@ export default function WebPageClient(): JSX.Element {
                 "Prospect",
                 "Account",
                 "reports",
+                "emailHistory",
+                "emailTemplates",
+                "emailSequences",
                 "Reminder",
             ].includes(tab)
         ) {
@@ -189,6 +202,29 @@ export default function WebPageClient(): JSX.Element {
                 <path d="M9 8h6" />
                 <path d="M9 12h6" />
                 <path d="M9 16h4" />
+            </SidebarIcon>
+        ),
+        emailTemplates: (
+            <SidebarIcon>
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M3 7l9 6 9-6" />
+            </SidebarIcon>
+        ),
+        emailHistory: (
+            <SidebarIcon>
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+                <path d="M8 8h8" />
+                <path d="M8 12h8" />
+                <path d="M8 16h5" />
+            </SidebarIcon>
+        ),
+        emailSequences: (
+            <SidebarIcon>
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M8 8h8" />
+                <path d="M8 12h8" />
+                <circle cx="6.5" cy="8" r="0.8" />
+                <circle cx="6.5" cy="12" r="0.8" />
             </SidebarIcon>
         ),
         addLead: "",
@@ -342,6 +378,16 @@ export default function WebPageClient(): JSX.Element {
         "Account",
         "reports",
     ];
+    const engageTabs: TabKey[] = [
+        "emailTemplates",
+        "emailSequences",
+        "emailHistory",
+    ];
+    const isEngageTabActive = engageTabs.includes(sidebarActiveTab);
+
+    useEffect(() => {
+        if (isEngageTabActive) setEngageExpanded(true);
+    }, [isEngageTabActive]);
 
     // ---- RENDER CONTENT ----
 
@@ -492,6 +538,15 @@ export default function WebPageClient(): JSX.Element {
 
             case "reports":
                 return <ReportsClient key={activeCompanyId ?? "none"} />;
+
+            case "emailHistory":
+                return <EmailHistoryClient key={activeCompanyId ?? "none"} />;
+
+            case "emailTemplates":
+                return <EmailTemplatesClient key={activeCompanyId ?? "none"} />;
+
+            case "emailSequences":
+                return <EmailSequencesClient key={activeCompanyId ?? "none"} />;
 
             case "editLead":
                 return (
@@ -678,6 +733,87 @@ export default function WebPageClient(): JSX.Element {
                                 </li>
                             );
                         })}
+
+                        {!sidebarCollapsed && (
+                            <li style={{ paddingRight: 8 }}>
+                                <div
+                                    style={{
+                                        border: "1px solid rgba(129, 157, 211, 0.24)",
+                                        borderRadius: 10,
+                                        background: "rgba(31, 58, 104, 0.28)",
+                                        padding: "6px 0 8px",
+                                    }}
+                                >
+                                    <button
+                                        onClick={() => setEngageExpanded((prev) => !prev)}
+                                        style={{
+                                            width: "100%",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            gap: 10,
+                                            textAlign: "left",
+                                            padding: "8px 14px",
+                                            borderRadius: 8,
+                                            border: "none",
+                                            cursor: "pointer",
+                                            background: "transparent",
+                                            color: "#dbeafe",
+                                            fontSize: 14,
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                                            <span style={{ display: "inline-flex", width: 18, justifyContent: "center" }}>✈</span>
+                                            <span>Engage</span>
+                                        </span>
+                                        <span style={{ opacity: 0.85 }}>{engageExpanded ? "⌃" : "⌄"}</span>
+                                    </button>
+
+                                    {engageExpanded && (
+                                        <div style={{ display: "grid", gap: 3, marginTop: 2 }}>
+                                            {engageTabs.map((tab) => {
+                                                const active = sidebarActiveTab === tab;
+                                                const icon = tabIcons[tab];
+                                                const label = getTabLabel(tab);
+                                                return (
+                                                    <button
+                                                        key={tab}
+                                                        onClick={() => handleTab(tab)}
+                                                        style={{
+                                                            width: "calc(100% - 12px)",
+                                                            marginLeft: 6,
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 10,
+                                                            textAlign: "left",
+                                                            padding: "9px 10px 9px 12px",
+                                                            borderRadius: 8,
+                                                            border: "1px solid transparent",
+                                                            borderLeft: active
+                                                                ? "2px solid #F26522"
+                                                                : "2px solid transparent",
+                                                            cursor: "pointer",
+                                                            background: active
+                                                                ? "rgba(59, 130, 246, 0.14)"
+                                                                : "transparent",
+                                                            color: active ? "#ffffff" : "rgba(226, 232, 240, 0.88)",
+                                                            fontSize: 14,
+                                                            fontWeight: active ? 600 : 500,
+                                                        }}
+                                                    >
+                                                        <span style={{ display: "inline-flex", width: 18, justifyContent: "center" }}>
+                                                            {icon}
+                                                        </span>
+                                                        <span>{label}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </li>
+                        )}
                     </ul>
                 </nav>
                 <div

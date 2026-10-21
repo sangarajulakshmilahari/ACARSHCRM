@@ -266,6 +266,15 @@ type Lead = {
   AccountTypeName?: string;
 };
 
+type ContactEmailHistoryRow = {
+  EmailId: number;
+  LeadContactID: number;
+  Subject: string;
+  Status: string;
+  SentAt: string | null;
+  CreatedAt: string | null;
+};
+
 // NEW: origin type & prop
 type OriginType = "leads" | "Prospect" | "Account" | "MasterAccount";
 
@@ -364,6 +373,14 @@ export default function LeadDetailsClient({
   const [isActivityContactLocked, setIsActivityContactLocked] = useState(false);
   const [activityContactSearch, setActivityContactSearch] = useState("");
   const [showActivityContactDropdown, setShowActivityContactDropdown] = useState(false);
+  const [contactEmailHistory, setContactEmailHistory] = useState<
+    ContactEmailHistoryRow[]
+  >([]);
+  const [contactEmailHistoryLoading, setContactEmailHistoryLoading] =
+    useState(false);
+  const [contactEmailHistoryError, setContactEmailHistoryError] = useState<
+    string | null
+  >(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectSortBy, setProjectSortBy] = useState<"name" | "company">("name");
   const [projectStatusFilter, setProjectStatusFilter] = useState<"all" | "active" | "hidden">("active");
@@ -571,6 +588,54 @@ export default function LeadDetailsClient({
     setShowActivityContactDropdown(false);
     setShowAddActivity(true);
   };
+
+  useEffect(() => {
+    const leadContactId = Number(selectedContact?.LeadContactID || 0);
+    if (!leadContactId) {
+      setContactEmailHistory([]);
+      setContactEmailHistoryError(null);
+      setContactEmailHistoryLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    async function loadContactEmailHistory() {
+      setContactEmailHistoryLoading(true);
+      setContactEmailHistoryError(null);
+      try {
+        const res = await fetch(
+          `/api/email/history?leadContactId=${leadContactId}&page=1&pageSize=10`,
+          { credentials: "include" }
+        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(
+            data?.error || `Failed to load contact email history (${res.status})`
+          );
+        }
+
+        const data = (await res.json()) as {
+          items?: ContactEmailHistoryRow[];
+        };
+
+        if (!mounted) return;
+        setContactEmailHistory(Array.isArray(data?.items) ? data.items : []);
+      } catch (err: any) {
+        if (!mounted) return;
+        setContactEmailHistory([]);
+        setContactEmailHistoryError(
+          err?.message || "Failed to load contact email history"
+        );
+      } finally {
+        if (mounted) setContactEmailHistoryLoading(false);
+      }
+    }
+
+    loadContactEmailHistory();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedContact?.LeadContactID]);
 
   const [reminderForm, setReminderForm] = useState({
     ReminderDate: "",
@@ -3553,6 +3618,105 @@ export default function LeadDetailsClient({
                           >
                             + Add Activity
                           </button>
+
+                          <div
+                            style={{
+                              marginTop: 10,
+                              border: "1px solid #e5eaf4",
+                              borderRadius: 8,
+                              background: "#f8fbff",
+                              padding: 10,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: "#1F3A68",
+                                marginBottom: 8,
+                              }}
+                            >
+                              Email History
+                            </div>
+
+                            {contactEmailHistoryLoading ? (
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                Loading email history...
+                              </div>
+                            ) : contactEmailHistoryError ? (
+                              <div style={{ fontSize: 12, color: "#991b1b" }}>
+                                {contactEmailHistoryError}
+                              </div>
+                            ) : contactEmailHistory.length === 0 ? (
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                No email history found for this contact.
+                              </div>
+                            ) : (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                {contactEmailHistory.map((item) => (
+                                  <div
+                                    key={item.EmailId}
+                                    style={{
+                                      border: "1px solid #dbe4f2",
+                                      borderRadius: 7,
+                                      background: "#fff",
+                                      padding: "8px 9px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        color: "#0f172a",
+                                        marginBottom: 4,
+                                      }}
+                                    >
+                                      {item.Subject || "—"}
+                                    </div>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        gap: 8,
+                                        flexWrap: "wrap",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          borderRadius: 999,
+                                          padding: "2px 8px",
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          color:
+                                            item.Status === "SENT"
+                                              ? "#166534"
+                                              : item.Status === "FAILED"
+                                                ? "#991b1b"
+                                                : "#1e3a8a",
+                                          background:
+                                            item.Status === "SENT"
+                                              ? "#dcfce7"
+                                              : item.Status === "FAILED"
+                                                ? "#fee2e2"
+                                                : "#dbeafe",
+                                        }}
+                                      >
+                                        {item.Status || "—"}
+                                      </span>
+                                      <span
+                                        style={{ fontSize: 11, color: "#64748b" }}
+                                      >
+                                        {formatDateTime(
+                                          item.SentAt || item.CreatedAt || undefined
+                                        )}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

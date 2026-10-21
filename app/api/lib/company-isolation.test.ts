@@ -7,6 +7,8 @@ import {
   requireCompanyId,
   resolveWriteCompanyId,
 } from "./company-tenancy";
+import { authorizeEmailDispatchRequest } from "./email-dispatch";
+import { authorizeEmailDeliveryRequest } from "./email-delivery";
 import { buildLeadOwnerVisibilityClause } from "./lead-access";
 
 test("two-company write helper rejects parent/auth mismatch", () => {
@@ -42,6 +44,30 @@ test("guessed foreign ids fail write company resolution", () => {
   assert.throws(() => resolveWriteCompanyId(11, null), /missing CompanyId/);
 });
 
+test("email event writes inherit CompanyId from the parent email", async () => {
+  const { insertEmailEventForEmail } = await import("./email-events-write");
+  const sqls: string[] = [];
+  const pool = {
+    query: async (sql: string, params: any[] = []) => {
+      sqls.push(String(sql));
+      assert.equal(params[0], "SENT");
+      assert.equal(params[3], 44);
+      return [{ affectedRows: 1 }];
+    },
+  };
+  const result = await insertEmailEventForEmail({
+    poolOrConn: pool,
+    emailId: 44,
+    eventType: "SENT",
+    uniqueByEventType: true,
+    metadata: { source: "test" },
+  });
+  assert.equal(result.inserted, true);
+  assert.match(sqls[0], /e\.CompanyId/);
+  assert.match(sqls[0], /FROM emails e/);
+  assert.match(sqls[0], /e\.CompanyId IS NOT NULL/);
+});
+
 test("two-company reports predicate never mixes tenants", () => {
   const companyA = companyPredicate("l", 11);
   const companyB = companyPredicate("l", 22);
@@ -64,6 +90,29 @@ test("SOW download queries must include CompanyId", () => {
   assert.match(sql, /CompanyId = \?/);
   assert.equal(companyId, 11);
   assert.throws(() => requireCompanyId({ companyId: null }), /membership required/);
+});
+
+test("service jobs authorize with a token and never mix tenant mutations", () => {
+  const originalDispatch = process.env.EMAIL_DISPATCH_TOKEN;
+  const originalDelivery = process.env.EMAIL_DELIVERY_WEBHOOK_TOKEN;
+  process.env.EMAIL_DISPATCH_TOKEN = "job-token";
+  process.env.EMAIL_DELIVERY_WEBHOOK_TOKEN = "hook-token";
+  try {
+    assert.equal(authorizeEmailDispatchRequest("job-token").ok, true);
+    assert.equal(authorizeEmailDispatchRequest("wrong").ok, false);
+    assert.equal(authorizeEmailDispatchRequest("wrong").status, 403);
+    assert.equal(authorizeEmailDeliveryRequest("hook-token").ok, true);
+    assert.equal(authorizeEmailDeliveryRequest("wrong").status, 403);
+    delete process.env.EMAIL_DISPATCH_TOKEN;
+    assert.equal(authorizeEmailDispatchRequest("job-token").status, 503);
+  } finally {
+    if (originalDispatch === undefined) delete process.env.EMAIL_DISPATCH_TOKEN;
+    else process.env.EMAIL_DISPATCH_TOKEN = originalDispatch;
+    if (originalDelivery === undefined) delete process.env.EMAIL_DELIVERY_WEBHOOK_TOKEN;
+    else process.env.EMAIL_DELIVERY_WEBHOOK_TOKEN = originalDelivery;
+  }
+  const sql = `UPDATE emails SET Status = 'SENT' WHERE EmailId = ? AND CompanyId = ? AND Status = 'SENDING'`;
+  assert.match(sql, /CompanyId = \?/);
 });
 
 test("SubCategory is an intentionally global lookup", () => {

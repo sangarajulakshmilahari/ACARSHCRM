@@ -5,8 +5,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createPortal } from "react-dom";
-import { Filter, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, ListPlus, Mail, X } from "lucide-react";
 import { formatLocaleDate } from "@/app/utils/dateTime";
+import SendEmailModal, {
+  DeferredEmailActionPayload,
+  SendEmailRecipient,
+} from "./SendEmailModal";
 import {
   convertLeadDirectToAccountWithExistingFlow,
   convertLeadWithExistingFlow,
@@ -74,6 +78,25 @@ type OutreachAnalytics = {
   totalEmailsSent: number;
   acceptanceRate: number;
 };
+type SelectedBulkContact = {
+  key: string;
+  leadContactId: number | null;
+  leadId: number | string;
+  companyName: string;
+  contactName: string;
+  contactTitle: string;
+  contactRoleName: string;
+  contactEmail: string;
+};
+
+type DeferredActionType = "send_now" | "schedule";
+
+type SequenceOption = {
+  SequenceId: number;
+  SequenceName: string;
+  Status?: string;
+  StepCount?: number;
+};
 
 type LeadListFilters = {
   dateFrom: string;
@@ -130,12 +153,31 @@ export default function EmployeeList({
     totalEmailsSent: 0,
     acceptanceRate: 0,
   });
+  const [expandedContactRows, setExpandedContactRows] = useState<
+    Record<string, boolean>
+  >({});
+  const [selectedBulkContacts, setSelectedBulkContacts] = useState<
+    Record<string, SelectedBulkContact>
+  >({});
+  const [sendEmailOpen, setSendEmailOpen] = useState(false);
+  const [addToSequenceOpen, setAddToSequenceOpen] = useState(false);
+  const [sequencesLoading, setSequencesLoading] = useState(false);
+  const [sequenceEnrollLoading, setSequenceEnrollLoading] = useState(false);
+  const [availableSequences, setAvailableSequences] = useState<SequenceOption[]>([]);
+  const [selectedSequenceId, setSelectedSequenceId] = useState<string>("");
+  const [sequenceNotice, setSequenceNotice] = useState<string | null>(null);
   const [deletingLeadId, setDeletingLeadId] = useState<number | string | null>(null);
   const [pendingDeleteLead, setPendingDeleteLead] = useState<Employee | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [archivedEmployees, setArchivedEmployees] = useState<Employee[]>([]);
   const [archivedLoading, setArchivedLoading] = useState(false);
   const [archivedError, setArchivedError] = useState<string | null>(null);
+
+  const bulkEmailEnabled = type === "lead";
+  const selectedBulkContactList = useMemo(
+    () => Object.values(selectedBulkContacts),
+    [selectedBulkContacts]
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -205,6 +247,8 @@ export default function EmployeeList({
     };
   }, []);
   useEffect(() => {
+    setExpandedContactRows({});
+    setSelectedBulkContacts({});
     setDraftFilters(EMPTY_LEAD_FILTERS);
     setAppliedFilters(EMPTY_LEAD_FILTERS);
     setPage(1);
@@ -617,6 +661,207 @@ export default function EmployeeList({
     [analytics]
   );
 
+  const toggleContactSelection = (
+    emp: Employee,
+    contact: Contact,
+    index: number
+  ) => {
+    const key = getContactSelectionKey(emp, contact, index);
+
+    setSelectedBulkContacts((prev) => {
+      const next = { ...prev };
+
+      if (next[key]) {
+        delete next[key];
+        return next;
+      }
+
+      next[key] = {
+        key,
+        leadContactId:
+          contact.LeadContactID !== null && contact.LeadContactID !== undefined
+            ? Number(contact.LeadContactID)
+            : null,
+        leadId: emp.LeadId,
+        companyName: emp.CompanyName?.trim() || "-",
+        contactName: contact.ContactName?.trim() || "-",
+        contactTitle: contact.ContactTitle?.trim() || "-",
+        contactRoleName: contact.ContactRoleName?.trim() || "-",
+        contactEmail: contact.ContactEmail?.trim() || "-",
+      };
+
+      return next;
+    });
+  };
+
+  const selectedContactsForSendModal = useMemo<SendEmailRecipient[]>(
+    () =>
+      selectedBulkContactList.map((item) => ({
+        key: item.key,
+        leadContactId: item.leadContactId,
+        leadId: item.leadId,
+        companyName: item.companyName,
+        contactName: item.contactName,
+        contactTitle: item.contactTitle,
+        contactRoleName: item.contactRoleName,
+        contactEmail: item.contactEmail,
+      })),
+    [selectedBulkContactList]
+  );
+
+  const selectedLeadContactIds = useMemo(
+    () =>
+      selectedBulkContactList
+        .map((item) => Number(item.leadContactId || 0))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    [selectedBulkContactList]
+  );
+
+  const loadSequencesForEnrollment = async () => {
+    setSequencesLoading(true);
+    setSequenceNotice(null);
+    try {
+      const res = await fetch("/api/email/sequences", {
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to load sequences");
+      }
+
+      const sequenceRows = (Array.isArray(data) ? data : []) as SequenceOption[];
+      const eligible = sequenceRows.filter(
+        (sequence) => Number(sequence.StepCount || 0) > 0
+      );
+
+      setAvailableSequences(eligible);
+      setSelectedSequenceId(
+        eligible.length > 0 ? String(eligible[0].SequenceId) : ""
+      );
+
+      if (eligible.length === 0) {
+        setSequenceNotice(
+          "No sequence with steps is available. Create/update a sequence in Email Sequences first."
+        );
+      }
+    } catch (error: any) {
+      setAvailableSequences([]);
+      setSelectedSequenceId("");
+      setSequenceNotice(error?.message || "Failed to load sequences");
+    } finally {
+      setSequencesLoading(false);
+    }
+  };
+
+  const handleOpenAddToSequence = async () => {
+    if (selectedLeadContactIds.length === 0) {
+      window.alert("Selected contacts are missing contact IDs. Please reselect contacts.");
+      return;
+    }
+
+    setAddToSequenceOpen(true);
+    await loadSequencesForEnrollment();
+  };
+
+  const handleConfirmAddToSequence = async () => {
+    if (!selectedSequenceId) {
+      setSequenceNotice("Select a sequence to continue.");
+      return;
+    }
+
+    setSequenceEnrollLoading(true);
+    setSequenceNotice(null);
+
+    try {
+      const res = await fetch(
+        `/api/email/sequences/${encodeURIComponent(selectedSequenceId)}/enroll`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            leadContactIds: selectedLeadContactIds,
+          }),
+        }
+      );
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to enroll contacts");
+      }
+
+      const enrolledCount = Number(data?.enrolledCount || 0);
+      const skippedCount = Number(data?.skippedCount || 0);
+      window.alert(
+        `Added to sequence. Enrolled: ${enrolledCount}, Skipped: ${skippedCount}.`
+      );
+      setAddToSequenceOpen(false);
+      setSelectedBulkContacts({});
+    } catch (error: any) {
+      setSequenceNotice(error?.message || "Failed to enroll contacts");
+    } finally {
+      setSequenceEnrollLoading(false);
+    }
+  };
+
+  const handleDeferredSendAction = (
+    action: DeferredActionType,
+    payload: DeferredEmailActionPayload
+  ): Promise<{ success: boolean; message: string; sentCount?: number; failedCount?: number }> => {
+    return (async () => {
+      const body = {
+        action,
+        templateId: payload.templateId,
+        subject: payload.subject,
+        body: payload.body,
+        scheduleAt: payload.scheduleAt,
+        attachments: payload.attachments,
+        recipients: payload.recipients.map((recipient) => ({
+          leadContactId: recipient.leadContactId,
+        })),
+      };
+
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data?.error || (action === "schedule" ? "Failed to schedule email." : "Failed to send email."),
+          sentCount: Number(data?.sentCount || 0),
+          failedCount: Number(data?.failedCount || 0),
+        };
+      }
+
+      const sentCount = Number(
+        data?.sentCount || data?.scheduledCount || payload.recipientCount || 0
+      );
+      const failedCount = Number(data?.failedCount || 0);
+
+      setSendEmailOpen(false);
+      setSelectedBulkContacts({});
+
+      return {
+        success: true,
+        message:
+          data?.message ||
+          (action === "schedule"
+            ? `${payload.recipientCount} email${payload.recipientCount === 1 ? "" : "s"} scheduled successfully.`
+            : "Email sent successfully."),
+        sentCount,
+        failedCount,
+      };
+    })();
+  };
 
   const renderCompactContactsCell = (emp: Employee) => {
     return emp.Contacts && emp.Contacts.length > 0 ? (
@@ -766,7 +1011,109 @@ export default function EmployeeList({
     );
   };
 
-  if (!showArchived && error)  if (!showArchived && error) return <div style={{ color: "red" }}>Error: {error}</div>;
+  const renderExpandableContactsCell = (emp: Employee) => {
+    const contacts = emp.Contacts || [];
+    const contactCount = contacts.length;
+    const rowKey = String(emp.LeadId);
+    const isExpanded = Boolean(expandedContactRows[rowKey]);
+    const previewNames = contacts
+      .slice(0, 2)
+      .map((contact) => contact.ContactName?.trim())
+      .filter(Boolean)
+      .join(", ");
+
+    if (contactCount === 0) return <span>-</span>;
+
+    return (
+      <div onClick={(e) => e.stopPropagation()} style={contactCellWrapStyle}>
+        <button
+          type="button"
+          onClick={() =>
+            setExpandedContactRows((prev) => ({
+              ...prev,
+              [rowKey]: !prev[rowKey],
+            }))
+          }
+          style={contactToggleButtonStyle}
+          title={isExpanded ? "Collapse contacts" : "Expand contacts"}
+        >
+          {isExpanded ? (
+            <ChevronDown size={14} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={14} aria-hidden="true" />
+          )}
+          <span style={contactToggleTextStyle}>
+            {contactCount} contact{contactCount === 1 ? "" : "s"}
+            {previewNames ? ` · ${previewNames}` : ""}
+          </span>
+        </button>
+      </div>
+    );
+  };
+
+  const renderExpandedContactsPanel = (emp: Employee) => {
+    const contacts = emp.Contacts || [];
+    if (contacts.length === 0) return null;
+
+    return (
+      <div onClick={(e) => e.stopPropagation()} style={expandedContactsPanelStyle}>
+        <div style={expandedContactsPanelHeaderStyle}>
+          <div style={expandedContactsPanelTitleStyle}>Contacts for {emp.CompanyName || "-"}</div>
+          <div style={expandedContactsPanelMetaStyle}>
+            {contacts.length} contact{contacts.length === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div style={expandedContactsTableWrapStyle}>
+          <table style={expandedContactsTableStyle}>
+            <thead>
+              <tr>
+                <th style={expandedContactsThStyle}>Select</th>
+                <th style={expandedContactsThStyle}>Contact</th>
+                <th style={expandedContactsThStyle}>Title / Role</th>
+                <th style={expandedContactsThStyle}>Email</th>
+                <th style={expandedContactsThStyle}>Phone</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.map((contact, index) => {
+                const selectionKey = getContactSelectionKey(emp, contact, index);
+                const selected = Boolean(selectedBulkContacts[selectionKey]);
+
+                return (
+                  <tr
+                    key={selectionKey}
+                    style={{
+                      ...expandedContactsTrStyle,
+                      background: selected ? "#fff7ed" : "#ffffff",
+                    }}
+                  >
+                    <td style={expandedContactsTdStyle}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleContactSelection(emp, contact, index)}
+                        style={contactCheckboxStyle}
+                        aria-label={`Select ${contact.ContactName || "contact"}`}
+                      />
+                    </td>
+                    <td style={expandedContactsTdStyle}>{contact.ContactName || "-"}</td>
+                    <td style={expandedContactsTdStyle}>
+                      {[contact.ContactTitle, contact.ContactRoleName].filter(Boolean).join(" / ") || "-"}
+                    </td>
+                    <td style={expandedContactsTdStyle}>{contact.ContactEmail || "-"}</td>
+                    <td style={expandedContactsTdStyle}>{contact.ContactPhone || "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  if (!showArchived && error) return <div style={{ color: "red" }}>Error: {error}</div>;
 
   const baseFontStyles: React.CSSProperties = {
     fontFamily: "Open Sans, sans-serif",
@@ -1265,6 +1612,47 @@ export default function EmployeeList({
         </div>
       ) : null}
 
+      {bulkEmailEnabled && selectedBulkContactList.length > 0 && (
+        <div style={bulkActionBarStyle}>
+          <div style={bulkSelectionSummaryStyle}>
+            {selectedBulkContactList.length} contact
+            {selectedBulkContactList.length === 1 ? "" : "s"} selected
+          </div>
+
+          <div style={bulkActionButtonGroupStyle}>
+            <button
+              type="button"
+              onClick={() => setSendEmailOpen(true)}
+              style={primaryBulkButtonStyle}
+              title="Send Email"
+            >
+              <Mail size={14} aria-hidden="true" />
+              <span>Send Email</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenAddToSequence}
+              style={secondaryBulkButtonStyle}
+              title="Add to Sequence"
+            >
+              <ListPlus size={14} aria-hidden="true" />
+              <span>Add to Sequence</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedBulkContacts({})}
+              style={clearBulkButtonStyle}
+              title="Clear Selection"
+            >
+              <X size={14} aria-hidden="true" />
+              <span>Clear Selection</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           flex: fillHeight ? 1 : undefined,
@@ -1349,6 +1737,8 @@ export default function EmployeeList({
               const rowKey = String(emp.LeadId);
               const leadScore = Number(emp.LeadScore ?? 0);
               const leadScoreRating = String(emp.LeadScoreRating || "COLD").toUpperCase();
+              const showExpandedContacts =
+                bulkEmailEnabled && Boolean(expandedContactRows[rowKey]) && (emp.Contacts || []).length > 0;
 
               return (
                 <React.Fragment key={emp.LeadId}>
@@ -1420,7 +1810,9 @@ export default function EmployeeList({
                     </td>
 
                     <td style={tdStyle}>
-                      {renderCompactContactsCell(emp)}
+                      {bulkEmailEnabled
+                        ? renderExpandableContactsCell(emp)
+                        : renderCompactContactsCell(emp)}
                     </td>
 
                     <td style={{ ...tdStyle, verticalAlign: "middle" }}>
@@ -1748,6 +2140,22 @@ export default function EmployeeList({
                       </div>
                     </td>
                   </tr>
+
+                  {showExpandedContacts && (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        style={{
+                          ...tdStyle,
+                          padding: "0 10px 10px",
+                          borderTop: "none",
+                          background: idx % 2 === 0 ? "#ffffff" : "#f8fbff",
+                        }}
+                      >
+                        {renderExpandedContactsPanel(emp)}
+                      </td>
+                    </tr>
+                  )}
                 </React.Fragment>
               );
             })}
@@ -1866,6 +2274,89 @@ export default function EmployeeList({
           </div>
         </div>
       </div>
+
+      {sendEmailOpen && bulkEmailEnabled && selectedContactsForSendModal.length > 0 && (
+        <SendEmailModal
+          contacts={selectedContactsForSendModal}
+          onClose={() => setSendEmailOpen(false)}
+          onSendNow={(payload) => handleDeferredSendAction("send_now", payload)}
+          onSchedule={(payload) => handleDeferredSendAction("schedule", payload)}
+        />
+      )}
+
+      {addToSequenceOpen &&
+        createPortal(
+          <div style={sequenceOverlayStyle} onClick={() => setAddToSequenceOpen(false)}>
+            <div style={sequenceModalStyle} onClick={(e) => e.stopPropagation()}>
+              <div style={sequenceModalHeaderStyle}>
+                <h3 style={sequenceModalTitleStyle}>Add to Sequence</h3>
+                <button
+                  type="button"
+                  onClick={() => setAddToSequenceOpen(false)}
+                  style={sequenceModalCloseStyle}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={sequenceModalBodyStyle}>
+                <div style={{ color: "#475569", fontSize: 12 }}>
+                  {selectedLeadContactIds.length} contact
+                  {selectedLeadContactIds.length === 1 ? "" : "s"} selected.
+                </div>
+
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "#334155" }}>
+                  Select Sequence
+                  <select
+                    value={selectedSequenceId}
+                    onChange={(e) => setSelectedSequenceId(e.target.value)}
+                    style={sequenceSelectStyle}
+                    disabled={sequencesLoading || sequenceEnrollLoading || availableSequences.length === 0}
+                  >
+                    {availableSequences.length === 0 ? (
+                      <option value="">No eligible sequence</option>
+                    ) : (
+                      availableSequences.map((sequence) => (
+                        <option key={sequence.SequenceId} value={String(sequence.SequenceId)}>
+                          {sequence.SequenceName}
+                          {sequence.Status ? ` (${sequence.Status})` : ""}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+
+                {sequenceNotice && <div style={sequenceNoticeStyle}>{sequenceNotice}</div>}
+              </div>
+
+              <div style={sequenceModalFooterStyle}>
+                <button
+                  type="button"
+                  onClick={() => setAddToSequenceOpen(false)}
+                  style={sequenceCancelButtonStyle}
+                  disabled={sequenceEnrollLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmAddToSequence}
+                  style={sequencePrimaryButtonStyle}
+                  disabled={
+                    sequenceEnrollLoading ||
+                    sequencesLoading ||
+                    !selectedSequenceId ||
+                    availableSequences.length === 0
+                  }
+                >
+                  {sequenceEnrollLoading ? "Adding..." : "Add to Sequence"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {pendingDeleteLead &&
         typeof window !== "undefined" &&
