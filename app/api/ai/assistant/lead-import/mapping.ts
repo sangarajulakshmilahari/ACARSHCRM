@@ -38,10 +38,6 @@ export const FIELD_LABELS: Record<AcarshField, string> = {
 
 export const REQUIRED_FIELDS: AcarshField[] = [
   "companyName",
-  "companyLocation",
-  "contactName",
-  "contactTitle",
-  "contactRole",
 ];
 
 const FIELD_ALIASES: Record<AcarshField, string[]> = {

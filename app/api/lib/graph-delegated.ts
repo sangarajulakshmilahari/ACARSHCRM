@@ -54,7 +54,7 @@ export function getAzureAuthConfig(): AzureAuthConfig {
     trim(process.env.AZURE_AD_TENANT_ID) || trim(process.env.AZURE_TENANT_ID);
   const redirectUri =
     trim(process.env.AZURE_AD_REDIRECT_URI) ||
-    "http://localhost:3001/api/auth/callback/azure-ad";
+    "https://localhost:3001/api/auth/callback/azure-ad";
 
   if (!clientId || !clientSecret || !tenantId) {
     throw new GraphDelegatedAuthError(
@@ -170,7 +170,7 @@ export function buildGraphPostAuthUrl(args: {
   tab?: unknown;
   params?: Record<string, string>;
 }): URL {
-  const target = new URL("/webpage", args.origin || "http://localhost:3001");
+  const target = new URL("/webpage", args.origin || "https://localhost:3001");
   target.searchParams.set("tab", normalizeEngageTab(args.tab));
   Object.entries(args.params || {}).forEach(([key, value]) => {
     if (value) target.searchParams.set(key, value);

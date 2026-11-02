@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getAuthUser } from "@/app/api/lib/auth";
 import {
+  canRevealPhoneNumbers,
+  canUseApolloPhoneWebhook,
   enrichApolloPerson,
+  getPhoneRevealMode,
   toApolloErrorResponse,
 } from "@/app/api/lib/apollo";
 
@@ -16,6 +19,7 @@ type EnrichRequestBody = {
   contactName?: string;
   companyName?: string;
   companyDomain?: string;
+  revealPhoneNumber?: boolean;
 };
 
 function toCleanString(value: unknown): string | undefined {
@@ -48,6 +52,11 @@ export async function POST(req: NextRequest) {
         hasContactName: Boolean(payload.contactName),
         hasCompanyName: Boolean(payload.companyName),
         hasCompanyDomain: Boolean(payload.companyDomain),
+        revealRequested: canRevealPhoneNumbers(),
+        clientRequestedReveal: body.revealPhoneNumber === true,
+        revealEnabled: canRevealPhoneNumbers(),
+        revealMode: getPhoneRevealMode(),
+        webhookEnabled: canUseApolloPhoneWebhook(),
         apolloPersonIdPreview: payload.apolloPersonId
           ? `${payload.apolloPersonId.slice(0, 8)}...`
           : null,
@@ -84,7 +93,8 @@ export async function POST(req: NextRequest) {
       companyName: payload.companyName,
       companyDomain: payload.companyDomain,
       revealPersonalEmails: false,
-      revealPhoneNumber: false,
+      revealPhoneNumber: canRevealPhoneNumbers(),
+      actor: { userId: user.userId, companyId: user.companyId },
     });
 
     if (process.env.NODE_ENV !== "production") {
@@ -94,7 +104,7 @@ export async function POST(req: NextRequest) {
         hasWorkEmail: Boolean(person?.workEmail),
         hasPhone: Boolean(person?.phone),
         phoneStatus: person?.phoneStatus ?? null,
-        requestId: person?.requestId ?? null,
+        hasRequestId: Boolean(person?.requestId),
       });
     }
 
@@ -107,6 +117,8 @@ export async function POST(req: NextRequest) {
       hasEmail: Boolean(person.workEmail),
       hasPhone: Boolean(person.phone),
       phoneStatus: person.phoneStatus,
+      phoneRevealEnabled: canRevealPhoneNumbers(),
+      revealMode: getPhoneRevealMode(),
       requestId: person.requestId,
     });
   } catch (error) {
@@ -115,7 +127,8 @@ export async function POST(req: NextRequest) {
         name: (error as any)?.name,
         message: (error as any)?.message,
         statusCode: (error as any)?.statusCode,
-        meta: (error as any)?.meta,
+        path: (error as any)?.meta?.path,
+        status: (error as any)?.meta?.status,
       });
     }
     const mapped = toApolloErrorResponse(error);
@@ -128,4 +141,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

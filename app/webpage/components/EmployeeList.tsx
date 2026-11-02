@@ -68,6 +68,7 @@ type Props = {
     leadId: number | string,
     origin?: DetailsOrigin
   ) => void;
+  onImportLeads?: () => void;
   onDeleteLead?: (leadId: number | string, type: EntityType) => Promise<void> | void;
   type: EntityType;
 };
@@ -130,6 +131,7 @@ export default function EmployeeList({
   tableMaxHeight,
   belowFiltersContent,
   onOpenLeadDetails,
+  onImportLeads,
   onDeleteLead,
   type,
 }: Props) {
@@ -1254,6 +1256,26 @@ export default function EmployeeList({
               >
                 {addButtonLabel}
               </button>
+
+              {type === "lead" && onImportLeads ? (
+                <button
+                  type="button"
+                  onClick={onImportLeads}
+                  style={{
+                    background: "#1F3A68",
+                    color: "white",
+                    padding: "7px 12px",
+                    border: "none",
+                    borderRadius: 6,
+                    fontSize: "10.05px",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Import Leads
+                </button>
+              ) : null}
 
               <button
                 type="button"

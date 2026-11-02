@@ -32,7 +32,8 @@ Features:
 How to run:
 1. npm install
 2. npm run dev
-3. Open http://localhost:3000
+3. Open https://localhost:3001 (self-signed cert; accept the browser warning)
+   Use `npm run dev:http` if you need HTTP instead.
 
 Project structure:
 - app/                 -> Next.js app (pages, API routes)

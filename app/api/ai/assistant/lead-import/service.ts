@@ -1,43 +1,35 @@
-import { getPool } from "@/config/db";
-import { calculateAndStoreLeadScore } from "@/app/api/lib/lead-scoring";
 import { enrichApolloPerson } from "@/app/api/lib/apollo";
+import { CompanyRequiredError } from "@/app/api/lib/company-tenancy";
+import {
+  CompanyMismatchError,
+  LeadImportAccessError,
+  __setLeadImportPoolFactoryForTests,
+  buildPreview,
+  commitImportPreviewRow,
+  getLeadImportPool,
+  loadExistingRecords,
+  loadLookups,
+  mappedValue,
+  pickLookup,
+  requireLeadImportActor,
+  summarize,
+  todayIso,
+  type LeadImportActor,
+  type LeadImportDefaults,
+  type LeadImportPreviewRow,
+  type LeadImportRowStatus,
+} from "@/app/api/lib/lead-import-core";
 import { parseSpreadsheetTable } from "../document-parser/excel-parser";
 import {
   ACARSH_FIELDS,
   FIELD_LABELS,
-  REQUIRED_FIELDS,
   detectColumnMapping,
   fieldFromLabel,
   type AcarshField,
 } from "./mapping";
 
-export type LeadImportDefaults = {
-  companyLocation: string;
-  contactTitle: string;
-  contactRole: string;
-  leadSource: string;
-  leadStatus: string;
-  ownerName: string;
-  leadDate: string;
-};
-
-export type LeadImportRowStatus =
-  | "new"
-  | "existing_company_new_contact"
-  | "duplicate"
-  | "needs_attention"
-  | "invalid";
-
-export type LeadImportPreviewRow = {
-  rowNumber: number;
-  companyName: string;
-  contactName: string;
-  contactTitle: string;
-  linkedInUrl: string;
-  status: LeadImportRowStatus;
-  reasons: string[];
-  existingLeadId?: number;
-};
+export type { LeadImportActor, LeadImportDefaults, LeadImportPreviewRow, LeadImportRowStatus };
+export { LeadImportAccessError, __setLeadImportPoolFactoryForTests, requireLeadImportActor };
 
 export type LeadImportCard = {
   fileName: string;
@@ -81,6 +73,8 @@ export type LeadImportCard = {
 };
 
 type PendingLeadImport = {
+  ownerUserId: number;
+  companyId: number;
   fileName: string;
   sheetName: string;
   columns: string[];
@@ -99,23 +93,90 @@ const importGlobal = globalThis as typeof globalThis & {
 const pendingImports = importGlobal.__acarshLeadImports || new Map<string, PendingLeadImport>();
 importGlobal.__acarshLeadImports = pendingImports;
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+let testEnricher: ((input: {
+  linkedinUrl?: string;
+  contactName: string;
+  companyName: string;
+}) => Promise<{ workEmail?: string | null; phone?: string | null } | null>) | null = null;
+
+export function __setLeadImportEnricherForTests(
+  enricher: ((input: {
+    linkedinUrl?: string;
+    contactName: string;
+    companyName: string;
+  }) => Promise<{ workEmail?: string | null; phone?: string | null } | null>) | null,
+) {
+  testEnricher = enricher;
 }
 
-function norm(value: string) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+export function __resetPendingLeadImportsForTests() {
+  pendingImports.clear();
 }
 
-function normKey(value: string) {
-  return norm(value).toLowerCase();
+export function __seedPendingLeadImportForTests(options: {
+  conversationId: string;
+  ownerUserId: number;
+  companyId: number;
+  fileName?: string;
+  sheetName?: string;
+  columns: string[];
+  rows: Array<Record<string, string>>;
+  mapping: Record<string, AcarshField>;
+  unmapped?: string[];
+  unmappedToNotes?: string[];
+  defaults?: Partial<LeadImportDefaults>;
+  skipInvalid?: boolean;
+}) {
+  const actor = requireLeadImportActor({ userId: options.ownerUserId, companyId: options.companyId });
+  pendingImports.set(options.conversationId, {
+    ownerUserId: actor.userId,
+    companyId: actor.companyId,
+    fileName: options.fileName || "leads.csv",
+    sheetName: options.sheetName || "Sheet1",
+    columns: options.columns,
+    rows: options.rows,
+    mapping: options.mapping,
+    unmapped: options.unmapped || options.columns.filter((column) => !options.mapping[column]),
+    unmappedToNotes: options.unmappedToNotes || [],
+    suggestions: [],
+    defaults: {
+      companyLocation: "New York",
+      contactTitle: "CEO",
+      contactRole: "Decision Maker",
+      leadSource: "Excel Import",
+      leadStatus: "New",
+      ownerName: "alice",
+      leadDate: todayIso(),
+      ...options.defaults,
+    },
+    skipInvalid: options.skipInvalid ?? true,
+  });
 }
 
-function linkedInKey(value: string) {
-  return norm(value)
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/$/, "");
+async function enrichImportedPerson(input: {
+  linkedinUrl?: string;
+  contactName: string;
+  companyName: string;
+}) {
+  if (testEnricher) return testEnricher(input);
+  return enrichApolloPerson(input);
+}
+
+function assertPendingImportAccess(pending: PendingLeadImport, actor: LeadImportActor) {
+  const verified = requireLeadImportActor(actor);
+  if (pending.ownerUserId !== verified.userId) {
+    throw new LeadImportAccessError();
+  }
+  if (pending.companyId !== verified.companyId) {
+    throw new CompanyMismatchError();
+  }
+}
+
+function requirePendingLeadImport(conversationId: string, actor: LeadImportActor) {
+  const pending = pendingImports.get(conversationId);
+  if (!pending) return null;
+  assertPendingImportAccess(pending, actor);
+  return pending;
 }
 
 export function isLeadImportIntent(message: string) {
@@ -126,171 +187,30 @@ export function isLeadImportIntent(message: string) {
   ) || /\b(show me what will be imported|import only the valid|skip the invalid)\b/.test(text);
 }
 
-export function getPendingLeadImport(conversationId: string) {
-  return pendingImports.get(conversationId) || null;
+export function getPendingLeadImport(conversationId: string, actor?: LeadImportActor | null) {
+  const pending = pendingImports.get(conversationId) || null;
+  if (!pending) return null;
+  if (!actor) return pending;
+  try {
+    assertPendingImportAccess(pending, actor);
+    return pending;
+  } catch {
+    return null;
+  }
 }
 
-export function clearPendingLeadImport(conversationId: string) {
+export function clearPendingLeadImport(conversationId: string, actor?: LeadImportActor | null) {
+  const pending = pendingImports.get(conversationId);
+  if (!pending) return;
+  if (actor) assertPendingImportAccess(pending, actor);
   pendingImports.delete(conversationId);
 }
 
-async function loadLookups() {
-  const pool = await getPool();
-  const [sources]: any = await pool.query(
-    `SELECT DISTINCT LeadSource FROM Leads WHERE LeadSource IS NOT NULL AND TRIM(LeadSource) <> '' ORDER BY LeadSource`,
-  );
-  const [statuses]: any = await pool.query(
-    `SELECT StatusName FROM LeadStatuses ORDER BY SortOrder, StatusId`,
-  );
-  const [owners]: any = await pool.query(
-    `SELECT DISTINCT UserName FROM Users WHERE UserName IS NOT NULL ORDER BY UserName`,
-  );
-  const [roles]: any = await pool.query(
-    `SELECT DISTINCT Role FROM ContactRoles WHERE Role IS NOT NULL ORDER BY Role`,
-  );
-  return {
-    leadSources: (sources || []).map((row: any) => String(row.LeadSource || "")).filter(Boolean),
-    leadStatuses: (statuses || []).map((row: any) => String(row.StatusName || "")).filter(Boolean),
-    owners: (owners || []).map((row: any) => String(row.UserName || "")).filter(Boolean),
-    contactRoles: (roles || []).map((row: any) => String(row.Role || "")).filter(Boolean),
-  };
-}
-
-function pickLookup(options: string[], preferred: string[], fallback = "") {
-  for (const item of preferred) {
-    const found = options.find((option) => option.toLowerCase() === item.toLowerCase());
-    if (found) return found;
-  }
-  for (const item of preferred) {
-    const found = options.find((option) => option.toLowerCase().includes(item.toLowerCase()));
-    if (found) return found;
-  }
-  return options[0] || fallback;
-}
-
-function mappedValue(row: Record<string, string>, mapping: Record<string, AcarshField>, field: AcarshField) {
-  const column = Object.entries(mapping).find(([, value]) => value === field)?.[0];
-  return column ? norm(row[column] || "") : "";
-}
-
-function notesFromUnmapped(row: Record<string, string>, columns: string[], mapping: Record<string, AcarshField>, extra: string[]) {
-  const parts: string[] = [];
-  for (const column of extra) {
-    const value = norm(row[column] || "");
-    if (value) parts.push(`${column}: ${value}`);
-  }
-  return parts.join("\n");
-}
-
-async function loadExistingRecords() {
-  const pool = await getPool();
-  const [rows]: any = await pool.query(
-    `SELECT l.LeadId, l.CompanyName, lc.ContactName, lc.ContactEmail, lc.LinkedInProfile
-     FROM Leads l
-     LEFT JOIN LeadContacts lc ON lc.LeadId = l.LeadId
-     WHERE COALESCE(l.IsArchived, 0) = 0`,
-  );
-  return (rows || []).map((row: any) => ({
-    leadId: Number(row.LeadId || 0),
-    companyName: normKey(row.CompanyName || ""),
-    contactName: normKey(row.ContactName || ""),
-    email: normKey(row.ContactEmail || ""),
-    linkedIn: linkedInKey(row.LinkedInProfile || ""),
-  })) as Array<{
-    leadId: number;
-    companyName: string;
-    contactName: string;
-    email: string;
-    linkedIn: string;
-  }>;
-}
-
-function buildPreview(options: {
-  pending: PendingLeadImport;
-  existing: Awaited<ReturnType<typeof loadExistingRecords>>;
-}): { rows: LeadImportPreviewRow[]; missingRequired: Array<{ field: AcarshField; label: string }> } {
-  const missingRequired = REQUIRED_FIELDS.filter((field) => {
-    const mapped = Object.values(options.pending.mapping).includes(field);
-    const defaulted = Boolean(
-      (field === "companyLocation" && options.pending.defaults.companyLocation) ||
-      (field === "contactTitle" && options.pending.defaults.contactTitle) ||
-      (field === "contactRole" && options.pending.defaults.contactRole),
-    );
-    return !mapped && !defaulted;
-  }).map((field) => ({ field, label: FIELD_LABELS[field] }));
-
-  const rows = options.pending.rows.map((row, index) => {
-    const companyName = mappedValue(row, options.pending.mapping, "companyName");
-    const contactName = mappedValue(row, options.pending.mapping, "contactName");
-    const contactTitle =
-      mappedValue(row, options.pending.mapping, "contactTitle") || options.pending.defaults.contactTitle;
-    const linkedInUrl = mappedValue(row, options.pending.mapping, "linkedInUrl");
-    const email = mappedValue(row, options.pending.mapping, "contactEmail");
-    const companyLocation =
-      mappedValue(row, options.pending.mapping, "companyLocation") || options.pending.defaults.companyLocation;
-    const reasons: string[] = [];
-    if (!companyName) reasons.push("Company Name missing");
-    if (!contactName) reasons.push("Contact Name missing");
-    if (!contactTitle) reasons.push("Contact Title missing");
-    if (!companyLocation) reasons.push("Company Location missing");
-    if (!options.pending.defaults.contactRole) reasons.push("Contact Role missing");
-
-    const companyMatch = options.existing.filter((item) => item.companyName && item.companyName === normKey(companyName));
-    const duplicate = options.existing.find((item) => {
-      if (linkedInUrl && item.linkedIn && item.linkedIn === linkedInKey(linkedInUrl)) return true;
-      if (email && item.email && item.email === normKey(email)) return true;
-      return Boolean(
-        companyName &&
-          contactName &&
-          item.companyName === normKey(companyName) &&
-          item.contactName === normKey(contactName),
-      );
-    });
-
-    let status: LeadImportRowStatus = "new";
-    if (reasons.length && (!companyName || !contactName)) status = "invalid";
-    else if (reasons.length) status = "needs_attention";
-    else if (duplicate) {
-      status = "duplicate";
-      reasons.push("Company already exists with this contact");
-    } else if (companyMatch.length) {
-      status = "existing_company_new_contact";
-    }
-
-    return {
-      rowNumber: index + 2,
-      companyName,
-      contactName,
-      contactTitle,
-      linkedInUrl,
-      status,
-      reasons,
-      existingLeadId: companyMatch[0]?.leadId,
-    };
-  });
-
-  return { rows, missingRequired };
-}
-
-function summarize(rows: LeadImportPreviewRow[], missingRequired: Array<{ field: AcarshField; label: string }>) {
-  const valid = rows.filter((row) => row.status === "new" || row.status === "existing_company_new_contact").length;
-  const needsAttention = rows.filter((row) => row.status === "needs_attention").length;
-  const invalid = rows.filter((row) => row.status === "invalid").length;
-  const existing = rows.filter((row) => row.status === "existing_company_new_contact").length;
-  const duplicate = rows.filter((row) => row.status === "duplicate").length;
-  return {
-    valid,
-    needsAttention,
-    invalid,
-    existing,
-    duplicate,
-    createCount: valid,
-    canConfirm: missingRequired.length === 0 && valid > 0,
-  };
-}
-
 async function toCard(pending: PendingLeadImport): Promise<LeadImportCard> {
-  const [lookups, existing] = await Promise.all([loadLookups(), loadExistingRecords()]);
+  const [lookups, existing] = await Promise.all([
+    loadLookups(pending.companyId),
+    loadExistingRecords(pending.companyId),
+  ]);
   const { rows, missingRequired } = buildPreview({ pending, existing });
   const summary = summarize(rows, missingRequired);
   return {
@@ -324,15 +244,24 @@ export async function startLeadImport(options: {
   fileName: string;
   fileBuffer: Buffer;
   ownerName: string;
+  userId: number;
+  companyId: number;
 }) {
+  const actor = requireLeadImportActor(options);
+  const existingPending = pendingImports.get(options.conversationId);
+  if (existingPending) {
+    assertPendingImportAccess(existingPending, actor);
+  }
   const table = parseSpreadsheetTable({
     fileName: options.fileName,
     fileBuffer: options.fileBuffer,
   });
   const detected = detectColumnMapping(table.columns);
-  const lookups = await loadLookups();
+  const lookups = await loadLookups(actor.companyId);
   const titleSuggestion = detected.suggestions.find((item) => item.field === "contactTitle");
   const pending: PendingLeadImport = {
+    ownerUserId: actor.userId,
+    companyId: actor.companyId,
     fileName: options.fileName,
     sheetName: table.sheetName,
     columns: table.columns,
@@ -358,6 +287,7 @@ export async function startLeadImport(options: {
 
 export function applyLeadImportUpdate(
   conversationId: string,
+  actor: LeadImportActor,
   update: {
     mapping?: Record<string, AcarshField>;
     defaults?: Partial<LeadImportDefaults>;
@@ -365,7 +295,7 @@ export function applyLeadImportUpdate(
     skipInvalid?: boolean;
   },
 ) {
-  const pending = pendingImports.get(conversationId);
+  const pending = requirePendingLeadImport(conversationId, actor);
   if (!pending) return null;
   if (update.mapping) {
     pending.mapping = { ...pending.mapping };
@@ -382,14 +312,14 @@ export function applyLeadImportUpdate(
   return pending;
 }
 
-export async function previewPendingLeadImport(conversationId: string) {
-  const pending = pendingImports.get(conversationId);
+export async function previewPendingLeadImport(conversationId: string, actor: LeadImportActor) {
+  const pending = requirePendingLeadImport(conversationId, actor);
   if (!pending) return null;
   return toCard(pending);
 }
 
-export function applyImportMessage(conversationId: string, message: string) {
-  const pending = pendingImports.get(conversationId);
+export function applyImportMessage(conversationId: string, actor: LeadImportActor, message: string) {
+  const pending = requirePendingLeadImport(conversationId, actor);
   if (!pending) return false;
   const text = String(message || "").trim();
   const mapMatch = text.match(/\bmap\s+(.+?)\s+to\s+(.+)$/i);
@@ -417,77 +347,15 @@ export function applyImportMessage(conversationId: string, message: string) {
   return true;
 }
 
-async function createLeadRecord(conn: any, payload: {
-  CompanyName: string;
-  CompanyLocation: string;
-  LeadSource: string;
-  LeadDate: string;
-  Notes: string;
-  OwnerName: string;
-  IndustryFocus?: string;
-  CompanyId: number;
-}) {
-  const [ownerRows]: any = await conn.query(`SELECT UserId FROM Users WHERE UserName = ?`, [payload.OwnerName]);
-  const OwnerId = ownerRows[0]?.UserId ?? null;
-  const [leadInsert]: any = await conn.query(
-    `INSERT INTO Leads (CompanyName, CompanyLocation, LeadSource, LeadDate, LeadNotes, OwnerId, CompanyId)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [payload.CompanyName, payload.CompanyLocation, payload.LeadSource, payload.LeadDate, payload.Notes, OwnerId, payload.CompanyId],
-  );
-  const leadId = Number(leadInsert.insertId);
-  if (payload.IndustryFocus) {
-    try {
-      await conn.query(`UPDATE Leads SET IndustryFocus = ? WHERE LeadId = ?`, [payload.IndustryFocus, leadId]);
-    } catch {
-      // IndustryFocus is optional depending on schema.
-    }
-  }
-  return leadId;
-}
-
-async function createContactRecord(conn: any, payload: {
-  LeadId: number;
-  CompanyId: number;
-  ContactName: string;
-  ContactEmail: string;
-  ContactPhone: string;
-  ContactTitle: string;
-  ContactNotes: string;
-  ContactRoleName: string;
-  LinkedInProfile: string;
-}) {
-  const [roleRows]: any = await conn.query(`SELECT RoleId FROM ContactRoles WHERE Role = ?`, [payload.ContactRoleName]);
-  if (!roleRows?.length) throw new Error("Invalid Contact Role");
-  const ContactRoleId = roleRows[0].RoleId;
-  const linkedIn = payload.LinkedInProfile.replace(/^https?:\/\//i, "").replace(/\/$/, "") || null;
-  await conn.query(
-    `INSERT INTO LeadContacts
-      (LeadId, CompanyId, ContactName, ContactEmail, ContactPhone, ContactTitle, ContactNotes, ContactRoleId, LinkedInProfile, LinkedInRequestSent, LinkedInRequestAccepted, EmailSent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.LeadId,
-      payload.CompanyId,
-      payload.ContactName,
-      payload.ContactEmail || null,
-      payload.ContactPhone || null,
-      payload.ContactTitle,
-      payload.ContactNotes || null,
-      ContactRoleId,
-      linkedIn,
-      0,
-      0,
-      0,
-    ],
-  );
-}
-
-export async function confirmLeadImport(conversationId: string, companyId: number) {
-  const pending = pendingImports.get(conversationId);
+export async function confirmLeadImport(conversationId: string, actor: LeadImportActor) {
+  const verifiedActor = requireLeadImportActor(actor);
+  const pending = requirePendingLeadImport(conversationId, verifiedActor);
   if (!pending) throw new Error("There is no lead import waiting for confirmation.");
+  const companyId = pending.companyId;
   const card = await toCard(pending);
   if (!card.canConfirm) throw new Error("Resolve required fields before creating leads.");
 
-  const existing = await loadExistingRecords();
+  const existing = await loadExistingRecords(companyId);
   const { rows } = buildPreview({ pending, existing });
   const toCreate = rows.filter((row) => row.status === "new" || row.status === "existing_company_new_contact");
   const result = {
@@ -502,55 +370,33 @@ export async function confirmLeadImport(conversationId: string, companyId: numbe
     scored: 0,
   };
 
-  const pool = await getPool();
+  const pool = await getLeadImportPool();
   for (const preview of toCreate) {
     const source = pending.rows[preview.rowNumber - 2] || {};
     const companyName = mappedValue(source, pending.mapping, "companyName");
     const contactName = mappedValue(source, pending.mapping, "contactName");
-    const contactTitle = mappedValue(source, pending.mapping, "contactTitle") || pending.defaults.contactTitle;
-    const companyLocation = mappedValue(source, pending.mapping, "companyLocation") || pending.defaults.companyLocation;
-    const industryFocus = mappedValue(source, pending.mapping, "industryFocus");
+    const linkedInUrl = mappedValue(source, pending.mapping, "linkedInUrl");
     const email = mappedValue(source, pending.mapping, "contactEmail");
     const phone = mappedValue(source, pending.mapping, "contactPhone");
-    const linkedInUrl = mappedValue(source, pending.mapping, "linkedInUrl");
-    const extraNotes = notesFromUnmapped(source, pending.columns, pending.mapping, pending.unmappedToNotes);
-    const contactNotes = [mappedValue(source, pending.mapping, "contactNotes"), extraNotes].filter(Boolean).join("\n");
-    const leadNotes = [mappedValue(source, pending.mapping, "leadNotes"), industryFocus ? `Industry: ${industryFocus}` : ""].filter(Boolean).join("\n");
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      let leadId = preview.existingLeadId || 0;
-      if (!leadId) {
-        leadId = await createLeadRecord(conn, {
-          CompanyName: companyName,
-          CompanyLocation: companyLocation,
-          LeadSource: pending.defaults.leadSource,
-          LeadDate: pending.defaults.leadDate,
-          Notes: leadNotes,
-          OwnerName: pending.defaults.ownerName,
-          IndustryFocus: industryFocus,
-          CompanyId: companyId,
-        });
-        result.createdLeads += 1;
-      }
-      await createContactRecord(conn, {
-        LeadId: leadId,
-        CompanyId: companyId,
-        ContactName: contactName,
-        ContactEmail: email,
-        ContactPhone: phone,
-        ContactTitle: contactTitle,
-        ContactNotes: contactNotes,
-        ContactRoleName: pending.defaults.contactRole,
-        LinkedInProfile: linkedInUrl,
+      const committed = await commitImportPreviewRow({
+        conn,
+        companyId,
+        source,
+        mapping: pending.mapping,
+        defaults: pending.defaults,
+        unmappedToNotes: pending.unmappedToNotes,
+        preview,
       });
-      result.createdContacts += 1;
-      await calculateAndStoreLeadScore(conn, leadId);
+      if (committed.createdLead) result.createdLeads += 1;
+      result.createdContacts += committed.createdContacts;
       result.scored += 1;
       await conn.commit();
 
       try {
-        const enriched = await enrichApolloPerson({
+        const enriched = await enrichImportedPerson({
           linkedinUrl: linkedInUrl || undefined,
           contactName,
           companyName,
@@ -560,8 +406,8 @@ export async function confirmLeadImport(conversationId: string, companyId: numbe
             `UPDATE LeadContacts
              SET ContactEmail = COALESCE(NULLIF(ContactEmail, ''), ?),
                  ContactPhone = COALESCE(NULLIF(ContactPhone, ''), ?)
-             WHERE LeadId = ? AND ContactName = ?`,
-            [enriched.workEmail || email || null, enriched.phone || phone || null, leadId, contactName],
+             WHERE LeadId = ? AND ContactName = ? AND CompanyId = ?`,
+            [enriched.workEmail || email || null, enriched.phone || phone || null, committed.leadId, contactName, companyId],
           );
           result.apolloEnriched += 1;
         } else {
@@ -610,4 +456,4 @@ export function importReply(card: LeadImportCard) {
   );
 }
 
-export { ACARSH_FIELDS, FIELD_LABELS };
+export { ACARSH_FIELDS, FIELD_LABELS, CompanyRequiredError, CompanyMismatchError };

@@ -19,7 +19,7 @@ function getCallbackOrigin() {
   } catch {
     // fall through
   }
-  return "http://localhost:3001";
+  return "https://localhost:3001";
 }
 
 function redirectToEngage(tab: string, params: Record<string, string>, extraCookies: string[] = []) {

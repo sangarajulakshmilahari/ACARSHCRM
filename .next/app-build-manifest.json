@@ -11,16 +11,17 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/access_denied/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/access_denied/page.js"
-    ],
     "/webpage/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/css/app/webpage/page.css",
       "static/chunks/app/webpage/page.js"
+    ],
+    "/webpage/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/webpage/layout.css",
+      "static/chunks/app/webpage/layout.js"
     ]
   }
 }

@@ -3,6 +3,11 @@
 import React, { useState, useEffect } from "react";
 import Select from "react-select";
 import CreatableSelect from "react-select/creatable";
+import {
+  buildApolloEnrichmentMessages,
+  mergeEnrichedContactIntoForm,
+  type ApolloPhoneStatus,
+} from "./apolloUi";
 
 type EntityType = "lead" | "prospect" | "account";
 
@@ -17,9 +22,8 @@ type ApolloContactCandidate = {
   location: string | null;
   linkedinUrl: string | null;
   organizationName: string | null;
+  source?: "search" | "match";
 };
-
-type ApolloPhoneStatus = "found" | "unavailable" | "timeout" | "not_requested";
 
 type AddLeadPageProps = {
   onBack?: () => void;
@@ -45,6 +49,8 @@ export default function AddLeadPage({
   const [apolloResults, setApolloResults] = useState<ApolloContactCandidate[]>([]);
   const [apolloPickerOpen, setApolloPickerOpen] = useState(false);
   const [selectedApolloPersonId, setSelectedApolloPersonId] = useState<string>("");
+  const [apolloPhoneRequestId, setApolloPhoneRequestId] = useState<string>("");
+  const [apolloPhoneStatus, setApolloPhoneStatus] = useState<ApolloPhoneStatus | "">("");
 
   // 🔹 Texts based on type
   const entityLabel: string =
@@ -166,11 +172,37 @@ export default function AddLeadPage({
     return raw.replace(/^https?:\/\//, "").replace(/\/$/, "");
   };
 
+  const applyApolloContactToForm = (contact: ApolloContactCandidate, phoneStatus: ApolloPhoneStatus | string) => {
+    setForm((prev) =>
+      mergeEnrichedContactIntoForm(prev, {
+        name: contact?.name,
+        title: contact?.title,
+        workEmail: contact?.workEmail,
+        phone: contact?.phone,
+        location: contact?.location,
+        linkedinUrl: contact?.linkedinUrl,
+        organizationName: contact?.organizationName,
+      }),
+    );
+
+    const messages = buildApolloEnrichmentMessages({
+      hasName: Boolean(contact?.name),
+      hasEmail: Boolean(contact?.workEmail),
+      hasPhone: Boolean(contact?.phone),
+      phoneStatus,
+    });
+    setApolloStatusMessage(messages.statusMessage);
+    setApolloError(messages.errorMessage);
+  };
+
   const handleFindContactWithApollo = async () => {
+    if (apolloSearchLoading || apolloEnrichLoading) return;
     setApolloError("");
     setApolloStatusMessage("");
     setApolloResults([]);
     setSelectedApolloPersonId("");
+    setApolloPhoneRequestId("");
+    setApolloPhoneStatus("");
 
     const payload = {
       companyName: form.CompanyName,
@@ -197,6 +229,7 @@ export default function AddLeadPage({
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        setApolloStatusMessage("");
         setApolloError(String(data?.error || "Apollo search failed."));
         return;
       }
@@ -208,7 +241,9 @@ export default function AddLeadPage({
         return;
       }
 
-      setApolloStatusMessage("Contact found");
+      setApolloStatusMessage(
+        results.length === 1 ? "1 Apollo contact found. Select it to apply details." : `${results.length} Apollo contacts found. Select one to apply details.`,
+      );
       setApolloResults(results);
       setApolloPickerOpen(true);
     } catch {
@@ -220,6 +255,7 @@ export default function AddLeadPage({
   };
 
   const handleUseApolloContact = async () => {
+    if (apolloEnrichLoading) return;
     if (!selectedApolloPersonId) {
       setApolloError("Select one Apollo contact first.");
       return;
@@ -232,13 +268,13 @@ export default function AddLeadPage({
     }
 
     setApolloError("");
-    setApolloStatusMessage("Retrieving email...");
+    setApolloStatusMessage("Retrieving contact details from Apollo...");
 
     const apolloPersonId = String(
       picked.apolloRawPersonId || picked.apolloPersonId || ""
     ).trim();
 
-    if (!apolloPersonId) {
+    if (!apolloPersonId && !picked.linkedinUrl) {
       setApolloStatusMessage("");
       setApolloError(
         "Selected Apollo contact is missing a valid Apollo ID. Please pick another contact or refine your search."
@@ -248,27 +284,15 @@ export default function AddLeadPage({
 
     try {
       setApolloEnrichLoading(true);
-      setApolloStatusMessage("Retrieving phone number from Apollo...");
       const enrichPayload = {
-        apolloPersonId,
+        apolloPersonId: apolloPersonId || undefined,
         apolloOrganizationId: picked.apolloOrganizationId || undefined,
         linkedinUrl: picked.linkedinUrl || form.LinkedInURL || undefined,
         contactName: picked.name || form.ContactName || undefined,
         companyName: form.CompanyName || picked.organizationName || undefined,
         companyDomain: getCompanyDomainIfAvailable(),
+        revealPhoneNumber: true,
       };
-
-      console.info("Apollo enrich request", {
-        hasApolloPersonId: Boolean(enrichPayload.apolloPersonId),
-        apolloPersonIdPreview: enrichPayload.apolloPersonId
-          ? `${enrichPayload.apolloPersonId.slice(0, 8)}...`
-          : null,
-        hasApolloOrganizationId: Boolean(enrichPayload.apolloOrganizationId),
-        hasLinkedinUrl: Boolean(enrichPayload.linkedinUrl),
-        hasContactName: Boolean(enrichPayload.contactName),
-        hasCompanyName: Boolean(enrichPayload.companyName),
-        hasCompanyDomain: Boolean(enrichPayload.companyDomain),
-      });
 
       const res = await fetch("/api/apollo/contacts/enrich", {
         method: "POST",
@@ -279,69 +303,21 @@ export default function AddLeadPage({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setApolloStatusMessage("");
-        const detailsText =
-          data?.details && typeof data.details === "object"
-            ? ` (${JSON.stringify(data.details)})`
-            : "";
-        const errorMessage =
-          data?.error ||
-          `Apollo enrichment failed (${res.status}: ${res.statusText})${detailsText}`;
+        const errorMessage = data?.error || `Apollo enrichment failed (${res.status}).`;
         setApolloError(String(errorMessage));
-        console.error("Apollo enrichment error", {
-          status: res.status,
-          error: data?.error,
-          details: data?.details,
-        });
         return;
       }
 
-      const contact = data?.contact || picked;
-      const phoneStatus = String(data?.phoneStatus || "") as ApolloPhoneStatus;
-      setForm((prev) => ({
-        ...prev,
-        CompanyName: String(prev.CompanyName || contact?.organizationName || "").trim(),
-        ContactName: String(contact?.name || prev.ContactName || "").trim(),
-        ContactTitle: String(contact?.title || prev.ContactTitle || "").trim(),
-        ContactEmail: String(contact?.workEmail || prev.ContactEmail || "").trim(),
-        ContactPhone: String(contact?.phone || prev.ContactPhone || "").trim(),
-        ContactLocation: String(contact?.location || prev.ContactLocation || "").trim(),
-        LinkedInURL: String(contact?.linkedinUrl || prev.LinkedInURL || "").trim(),
-      }));
-
-      if (!contact?.workEmail) {
-        setApolloError(
-          "Contact selected and saved, but work email is unavailable in Apollo. You can continue and enter email manually."
-        );
-      } else if (phoneStatus === "unavailable") {
-        setApolloError(
-          "Contact selected and saved, but phone number is unavailable in Apollo."
-        );
-      } else if (phoneStatus === "timeout") {
-        setApolloError(
-          "Contact selected and saved, but retrieving phone number timed out. You can edit phone manually."
-        );
-      } else {
-        setApolloError("");
-      }
-
-      if (phoneStatus === "found") {
-        setApolloStatusMessage("Contact enriched successfully");
-      } else if (phoneStatus === "unavailable") {
-        setApolloStatusMessage("Phone number unavailable");
-      } else if (phoneStatus === "timeout") {
-        setApolloStatusMessage("Retrieving phone number from Apollo timed out");
-      } else {
-        setApolloStatusMessage("Contact enriched successfully");
-      }
-
+      const contact = (data?.contact || picked) as ApolloContactCandidate;
+      const phoneStatus = String(data?.phoneStatus || "not_requested") as ApolloPhoneStatus;
+      applyApolloContactToForm(contact, phoneStatus);
+      setApolloPhoneStatus(phoneStatus);
+      setApolloPhoneRequestId(phoneStatus === "pending" ? String(data?.requestId || "") : "");
       setApolloPickerOpen(false);
       setApolloResults([]);
       setSelectedApolloPersonId("");
     } catch (error: any) {
       setApolloStatusMessage("");
-      console.error("Apollo enrichment request failed", {
-        message: error?.message || "unknown",
-      });
       setApolloError(
         error?.message || "Unable to enrich contact from Apollo right now."
       );
@@ -349,6 +325,55 @@ export default function AddLeadPage({
       setApolloEnrichLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!apolloPhoneRequestId || apolloPhoneStatus !== "pending") return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const timer = setInterval(async () => {
+      attempts += 1;
+      if (attempts > 20) {
+        clearInterval(timer);
+        if (!cancelled) {
+          setApolloPhoneStatus("unavailable");
+          setApolloStatusMessage((prev) =>
+            prev.includes("pending")
+              ? "Work email applied. No phone number available."
+              : "No phone number available.",
+          );
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `/api/apollo/contacts/phone-status?requestId=${encodeURIComponent(apolloPhoneRequestId)}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        const nextStatus = String(data?.phoneStatus || "") as ApolloPhoneStatus;
+        if (nextStatus === "found" && data?.phone) {
+          clearInterval(timer);
+          setApolloPhoneStatus("found");
+          setForm((prev) => mergeEnrichedContactIntoForm(prev, { phone: data.phone }));
+          setApolloStatusMessage("Phone number applied from Apollo.");
+          setApolloError("");
+        } else if (nextStatus === "unavailable" || nextStatus === "failed") {
+          clearInterval(timer);
+          setApolloPhoneStatus(nextStatus);
+          setApolloStatusMessage("No phone number available.");
+        }
+      } catch {
+        // Keep polling until the attempt cap. Network errors should not look like success.
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [apolloPhoneRequestId, apolloPhoneStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

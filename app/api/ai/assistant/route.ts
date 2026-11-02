@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveAuthUser, type ResolvedAuthUser } from "@/app/api/lib/auth";
+import {
+  CompanyMismatchError,
+  CompanyRequiredError,
+} from "@/app/api/lib/company-tenancy";
 
 import { addActivityDirect, executeConfirmedWrites, runAgent, type AssistantPageContext } from "./agent";
 import {
@@ -16,7 +20,9 @@ import {
   getPendingLeadImport,
   importReply,
   isLeadImportIntent,
+  LeadImportAccessError,
   previewPendingLeadImport,
+  requireLeadImportActor,
   startLeadImport,
 } from "./lead-import/service";
 import type { AcarshField } from "./lead-import/mapping";
@@ -424,6 +430,13 @@ async function conversationPayload(
 }
 
 function errorResponse(error: unknown) {
+  if (
+    error instanceof CompanyRequiredError ||
+    error instanceof CompanyMismatchError ||
+    error instanceof LeadImportAccessError
+  ) {
+    return NextResponse.json({ error: error.message }, { status: 403 });
+  }
   const message = error instanceof Error ? error.message : "Unexpected assistant error";
   console.error("[crm-assistant]", error);
   const unavailable =
@@ -593,15 +606,23 @@ export async function POST(req: NextRequest) {
       const spreadsheetAttachment = attachments.find((file) =>
         /\.(xlsx|xls|csv)$/i.test(file.originalFileName),
       );
+      const importActor = user.companyId
+        ? requireLeadImportActor(user)
+        : null;
+      const pendingForUser = getPendingLeadImport(conversationId, importActor);
       const importIntent =
         body.type === "lead_import_confirm" ||
         body.type === "lead_import_cancel" ||
         body.type === "lead_import_update" ||
-        (body.type === "chat" && (isLeadImportIntent(assistantQuestion) || Boolean(getPendingLeadImport(conversationId))));
+        (body.type === "chat" && (isLeadImportIntent(assistantQuestion) || Boolean(pendingForUser)));
 
       if (importIntent && !conversation.pendingWrites.length) {
         if (body.type === "lead_import_cancel" || (body.type === "chat" && /^(cancel|stop|never mind)/i.test(message))) {
-          clearPendingLeadImport(conversationId);
+          if (importActor) {
+            clearPendingLeadImport(conversationId, importActor);
+          } else {
+            clearPendingLeadImport(conversationId);
+          }
           const reply = "Lead import cancelled. No CRM records were created.";
           await saveExchange({
             user,
@@ -621,11 +642,12 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        if (body.type === "lead_import_confirm" || (body.type === "chat" && /^(confirm|create leads|yes,? create)/i.test(message) && getPendingLeadImport(conversationId))) {
-          if (!user.companyId) {
-            return NextResponse.json({ error: "Company membership required" }, { status: 403 });
-          }
-          const card = await confirmLeadImport(conversationId, user.companyId);
+        if (!importActor) {
+          return NextResponse.json({ error: "Company membership required" }, { status: 403 });
+        }
+
+        if (body.type === "lead_import_confirm" || (body.type === "chat" && /^(confirm|create leads|yes,? create)/i.test(message) && getPendingLeadImport(conversationId, importActor))) {
+          const card = await confirmLeadImport(conversationId, importActor);
           const reply = importReply(card);
           await saveExchange({
             user,
@@ -646,19 +668,19 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        if (body.type === "lead_import_update" && getPendingLeadImport(conversationId)) {
-          applyLeadImportUpdate(conversationId, {
+        if (body.type === "lead_import_update" && getPendingLeadImport(conversationId, importActor)) {
+          applyLeadImportUpdate(conversationId, importActor, {
             mapping: body.mapping as Record<string, AcarshField> | undefined,
             defaults: body.defaults,
             unmappedToNotes: body.unmappedToNotes,
             skipInvalid: body.skipInvalid,
           });
-        } else if (body.type === "chat" && getPendingLeadImport(conversationId)) {
-          applyImportMessage(conversationId, assistantQuestion);
+        } else if (body.type === "chat" && getPendingLeadImport(conversationId, importActor)) {
+          applyImportMessage(conversationId, importActor, assistantQuestion);
         }
 
-        let card = getPendingLeadImport(conversationId)
-          ? await previewPendingLeadImport(conversationId)
+        let card = getPendingLeadImport(conversationId, importActor)
+          ? await previewPendingLeadImport(conversationId, importActor)
           : null;
         if (!card && spreadsheetAttachment) {
           card = await startLeadImport({
@@ -666,6 +688,8 @@ export async function POST(req: NextRequest) {
             fileName: spreadsheetAttachment.originalFileName,
             fileBuffer: spreadsheetAttachment.fileBuffer,
             ownerName: user.userName,
+            userId: importActor.userId,
+            companyId: importActor.companyId,
           });
         }
         if (!card) {

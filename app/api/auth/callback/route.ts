@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { keycloak } from "../../lib/keycloak";
 import { resolveAuthUserFromAccessToken } from "@/app/api/lib/auth";
+import { applyKeycloakSessionCookies, expiresInFromTokenResponse } from "@/app/api/lib/keycloak-session";
 import { getPool } from "@/config/db";
 import {
   ACTIVE_COMPANY_COOKIE,
@@ -68,11 +69,13 @@ export async function GET(req: Request) {
 
   const isProd = process.env.NODE_ENV === "production";
   const response = NextResponse.redirect(new URL(location, origin), 302);
-  response.cookies.set("access_token", accessToken, {
-    httpOnly: true,
-    path: "/",
-    sameSite: "lax",
-    secure: isProd,
+  applyKeycloakSessionCookies(response, {
+    accessToken,
+    refreshToken: String(tokenData?.refresh_token || "").trim() || undefined,
+    expiresInSeconds: expiresInFromTokenResponse(tokenData, accessToken),
+    refreshExpiresInSeconds: Number(tokenData?.refresh_expires_in) > 0
+      ? Math.floor(Number(tokenData.refresh_expires_in))
+      : undefined,
   });
   if (destination.kind === "dashboard") {
     response.cookies.set(ACTIVE_COMPANY_COOKIE, String(destination.companyId), {

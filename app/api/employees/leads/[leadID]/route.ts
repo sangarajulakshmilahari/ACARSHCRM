@@ -9,6 +9,7 @@ import {
   ensureLeadScoresTable,
 } from "@/app/api/lib/lead-scoring";
 import { setLeadArchived } from "@/app/api/lib/lead-archive";
+import { loadLeadCustomFieldValues } from "@/app/api/lib/custom-fields";
 
 const deps = {
   getPool,
@@ -215,12 +216,22 @@ WHERE l.LeadId = ?
         [leadId]
       );
 
+      const contactIds = (Array.isArray(contacts) ? contacts : [])
+        .map((row: any) => Number(row?.LeadContactID))
+        .filter((id: number) => Number.isInteger(id) && id > 0);
+      const customFields = await loadLeadCustomFieldValues(conn, leadId, contactIds);
+      const contactsWithCustom = (Array.isArray(contacts) ? contacts : []).map((row: any) => ({
+        ...row,
+        CustomFields: customFields.contacts[Number(row?.LeadContactID)] || [],
+      }));
+
       return NextResponse.json({
         ...leadRows[0],
         LeadScore: leadRows[0].LeadScore ?? 0,
         LeadScoreRating: leadRows[0].LeadScoreRating ?? "COLD",
         LeadScoreBreakdown: parseScoreBreakdown(leadRows[0].LeadScoreBreakdown),
-        Contacts: contacts,
+        CustomFields: customFields.lead,
+        Contacts: contactsWithCustom,
         Activities: activities,
         Reminders: reminders,
         Opportunities: opportunities,

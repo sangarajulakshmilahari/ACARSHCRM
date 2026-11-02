@@ -20,8 +20,10 @@ type ParsedSheet = {
   rows: Array<Record<string, string>>;
 };
 
-const MAX_ROWS_PER_SHEET = 2000;
+export const MAX_ROWS_PER_SHEET = 2000;
+export const MAX_WORKBOOK_SHEETS = 40;
 const MAX_RELEVANT_ROWS = 120;
+const REFERENCE_SHEET_NAME = /^(summary|overview|instructions?|index|cover|notes|readme)$/i;
 
 function normalizeKey(value: string) {
   return String(value || "")
@@ -203,58 +205,116 @@ function summarizeWorkbook(question: string, sheets: ParsedSheet[]) {
   return { summary, structured, contextSnippet };
 }
 
-export function parseSpreadsheetTable(options: {
-  fileName: string;
-  fileBuffer: Buffer;
-}): { sheetName: string; columns: string[]; rows: Array<Record<string, string>> } {
+export type WorkbookSheetInfo = {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  importable: boolean;
+  reason?: string;
+  likelyReferenceSheet: boolean;
+};
+
+function loadWorkbook(fileBuffer: Buffer) {
   let XLSX: typeof import("xlsx");
   try {
     XLSX = loadXlsx();
   } catch {
     throw new Error("Spreadsheet parser is unavailable on the server.");
   }
-
-  let workbook: import("xlsx").WorkBook;
   try {
-    workbook = XLSX.read(options.fileBuffer, {
-      type: "buffer",
-      cellDates: true,
-      raw: false,
-    });
+    return {
+      XLSX,
+      workbook: XLSX.read(fileBuffer, {
+        type: "buffer",
+        cellDates: true,
+        raw: false,
+      }),
+    };
   } catch {
     throw new Error("I couldn't read this spreadsheet. Please use a valid .xls, .xlsx, or .csv file.");
   }
+}
 
+function normalizeSheetRows(
+  XLSX: typeof import("xlsx"),
+  worksheet: import("xlsx").WorkSheet | undefined,
+): { columns: string[]; rows: Array<Record<string, string>> } {
+  if (!worksheet) return { columns: [], rows: [] };
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+    defval: "",
+    raw: false,
+  });
+  const rows = rawRows.slice(0, MAX_ROWS_PER_SHEET).map((row) => {
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(row || {})) {
+      const normalizedKey = normalizeKey(String(key || ""));
+      if (!normalizedKey) continue;
+      normalized[normalizedKey] = String(value ?? "").replace(/\u0000/g, "").trim().slice(0, 2000);
+    }
+    return normalized;
+  }).filter((row) => Object.values(row).some((value) => value));
+  const columns = Array.from(
+    new Set(
+      rows
+        .flatMap((row) => Object.keys(row))
+        .map((column) => normalizeKey(column))
+        .filter(Boolean),
+    ),
+  ).slice(0, 100);
+  return { columns, rows };
+}
+
+export function listWorkbookSheets(options: {
+  fileName: string;
+  fileBuffer: Buffer;
+}): WorkbookSheetInfo[] {
+  const { XLSX, workbook } = loadWorkbook(options.fileBuffer);
+  const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.slice(0, MAX_WORKBOOK_SHEETS) : [];
+  if (!sheetNames.length) {
+    throw new Error("The spreadsheet has no worksheets.");
+  }
+  return sheetNames.map((name) => {
+    const parsed = normalizeSheetRows(XLSX, workbook.Sheets[name]);
+    const importable = parsed.rows.length > 0 && parsed.columns.length > 0;
+    return {
+      name,
+      rowCount: parsed.rows.length,
+      columnCount: parsed.columns.length,
+      importable,
+      reason: importable ? undefined : "This worksheet is empty or has no usable tabular data.",
+      likelyReferenceSheet: REFERENCE_SHEET_NAME.test(String(name || "").trim()),
+    };
+  });
+}
+
+export function parseSpreadsheetTable(options: {
+  fileName: string;
+  fileBuffer: Buffer;
+  sheetName?: string;
+}): { sheetName: string; columns: string[]; rows: Array<Record<string, string>> } {
+  const { XLSX, workbook } = loadWorkbook(options.fileBuffer);
   const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames : [];
   if (!sheetNames.length) {
     throw new Error("The spreadsheet has no worksheets.");
   }
 
+  const requested = String(options.sheetName || "").trim();
+  if (requested) {
+    const match = sheetNames.find((name) => name === requested);
+    if (!match) {
+      throw new Error(`Worksheet "${requested}" was not found in this workbook.`);
+    }
+    const parsed = normalizeSheetRows(XLSX, workbook.Sheets[match]);
+    if (!parsed.rows.length || !parsed.columns.length) {
+      throw new Error(`Worksheet "${match}" is empty or has no usable tabular data.`);
+    }
+    return { sheetName: match, columns: parsed.columns, rows: parsed.rows };
+  }
+
   for (const sheetName of sheetNames) {
-    const worksheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-      defval: "",
-      raw: false,
-    });
-    const rows = rawRows.slice(0, MAX_ROWS_PER_SHEET).map((row) => {
-      const normalized: Record<string, string> = {};
-      for (const [key, value] of Object.entries(row || {})) {
-        const normalizedKey = normalizeKey(String(key || ""));
-        if (!normalizedKey) continue;
-        normalized[normalizedKey] = String(value ?? "").replace(/\u0000/g, "").trim().slice(0, 2000);
-      }
-      return normalized;
-    }).filter((row) => Object.values(row).some((value) => value));
-    const columns = Array.from(
-      new Set(
-        rows
-          .flatMap((row) => Object.keys(row))
-          .map((column) => normalizeKey(column))
-          .filter(Boolean),
-      ),
-    ).slice(0, 100);
-    if (rows.length && columns.length) {
-      return { sheetName, columns, rows };
+    const parsed = normalizeSheetRows(XLSX, workbook.Sheets[sheetName]);
+    if (parsed.rows.length && parsed.columns.length) {
+      return { sheetName, columns: parsed.columns, rows: parsed.rows };
     }
   }
 

@@ -11,6 +11,15 @@ import {
 } from "../convert-actions";
 import { Search, Wrench, Star, Package, AlertTriangle } from "lucide-react";
 import { useDroitControl } from "../../components/WebpageDroitHost";
+type CustomFieldValueView = {
+  customFieldId: number;
+  fieldName: string;
+  fieldType: string;
+  entityType: "lead" | "contact";
+  entityId: number;
+  value: string;
+};
+
 type Contact = {
   LeadContactID?: number;
   ContactName?: string;
@@ -23,6 +32,7 @@ type Contact = {
   LinkedInRequestSent?: number | boolean;
   LinkedInRequestAccepted?: number | boolean;
   EmailSent?: number | boolean;
+  CustomFields?: CustomFieldValueView[];
 };
 type Activity = {
   ActivityId: number;
@@ -257,6 +267,7 @@ type Lead = {
   LeadNotes?: string | null;
   LeadDate?: string | number | Date;
   LeadSource?: string;
+  CustomFields?: CustomFieldValueView[];
   Contacts?: Contact[];
   Activities?: Activity[];
   Reminders?: Reminder[];
@@ -3555,6 +3566,37 @@ export default function LeadDetailsClient({
                           {String(c.ContactNotes || "").trim() || "—"}
                         </div>
                       </div>
+                      {(c.CustomFields || []).length > 0 ? (
+                        <div style={{ marginTop: 8 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "#1f3a68",
+                              marginBottom: 6,
+                            }}
+                          >
+                            Contact custom fields:
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              color: "#334155",
+                              background: "#f8fafc",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: 8,
+                              padding: "8px 10px",
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {(c.CustomFields || []).map((field) => (
+                              <div key={`${field.customFieldId}-${field.entityId}`}>
+                                <strong>{field.fieldName}:</strong> {field.value || "—"}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
 
                       {c.LeadContactID && lead.LeadId ? (
                         <div
@@ -3749,6 +3791,18 @@ export default function LeadDetailsClient({
         <strong>Notes:</strong>{" "}
         <span style={{ marginLeft: 8 }}>{lead.LeadNotes || "—"}</span>
       </div>
+      {(lead.CustomFields || []).length > 0 ? (
+        <div style={{ ...notesStyle, marginTop: 10 }}>
+          <strong>Custom fields:</strong>
+          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+            {(lead.CustomFields || []).map((field) => (
+              <div key={`${field.customFieldId}-${field.entityId}`}>
+                {field.fieldName}: {field.value || "—"}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {!customerLeadsLoading && !customerLeadsError && customerLeads.length > 0 && (
         <>

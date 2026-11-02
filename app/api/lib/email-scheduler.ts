@@ -22,11 +22,43 @@ function getSchedulerApiUrl(path: "/api/email/dispatch" | "/api/email/replies/sy
   }
 
   if (process.env.NODE_ENV !== "production") {
-    return `http://localhost:${port}${path}`;
+    return `https://localhost:${port}${path}`;
   }
 
-  const baseUrl = publicBaseUrl || authBaseUrl || `http://localhost:${port}`;
+  const baseUrl = publicBaseUrl || authBaseUrl || `https://localhost:${port}`;
   return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function isLocalHttpsUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      (parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "::1")
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function schedulerFetch(url: string, init: RequestInit) {
+  if (!isLocalHttpsUrl(url)) {
+    return fetch(url, init);
+  }
+
+  const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  try {
+    return await fetch(url, init);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+    }
+  }
 }
 
 function getDispatchUrl() {
@@ -65,7 +97,7 @@ export function startEmailScheduler() {
     isRunning = true;
     try {
       console.log("[Email Scheduler] Checking scheduled emails...");
-      const response = await fetch(dispatchUrl, {
+      const response = await schedulerFetch(dispatchUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -91,7 +123,7 @@ export function startEmailScheduler() {
       }
 
       const repliesUrl = getSchedulerApiUrl("/api/email/replies/sync");
-      const repliesResponse = await fetch(repliesUrl, {
+      const repliesResponse = await schedulerFetch(repliesUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",

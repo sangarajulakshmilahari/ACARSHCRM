@@ -22,6 +22,7 @@ import ReportsClient from "./reports/ReportsClient";
 import EmailTemplatesClient from "./email-templates/EmailTemplatesClient";
 import EmailHistoryClient from "./email-history/EmailHistoryClient";
 import EmailSequencesClient from "./email-sequences/EmailSequencesClient";
+import LeadImportClient from "./import/leads/LeadImportClient";
 
 import { useDroitLayout } from "./components/WebpageDroitHost";
 
@@ -40,6 +41,7 @@ type TabKey =
     | "emailHistory"
     | "emailTemplates"
     | "emailSequences"
+    | "importLeads"
     | "editLead";
 
 type SidebarIconProps = {
@@ -75,6 +77,7 @@ function getTabLabel(tab: TabKey): string {
     if (tab === "emailHistory") return "Email History";
     if (tab === "emailTemplates") return "Email Templates";
     if (tab === "emailSequences") return "Email Sequences";
+    if (tab === "importLeads") return "Smart Lead & Contact Import";
     return tab[0].toUpperCase() + tab.slice(1);
 }
 
@@ -153,6 +156,7 @@ export default function WebPageClient(): JSX.Element {
                 "emailHistory",
                 "emailTemplates",
                 "emailSequences",
+                "importLeads",
                 "Reminder",
             ].includes(tab)
         ) {
@@ -233,6 +237,7 @@ export default function WebPageClient(): JSX.Element {
         addAccount: "",
         addAccountLead: "",
         editLead: "",
+        importLeads: "",
     };
 
     // ---- API CALLS ----
@@ -325,7 +330,7 @@ export default function WebPageClient(): JSX.Element {
     const sidebarActiveTab: TabKey =
         activeTab === "leadDetails" || activeTab === "editLead"
             ? selectedLeadOrigin ?? "leads"
-            : activeTab === "addLead"
+            : activeTab === "addLead" || activeTab === "importLeads"
                 ? "leads"
                 : activeTab === "addProspect"
                     ? "Prospect"
@@ -412,6 +417,20 @@ export default function WebPageClient(): JSX.Element {
                         onOpenLeadDetails={(leadId, origin) => {
                             setSelectedLeadId(leadId);
                             setSelectedLeadOrigin(origin ?? "leads");
+                            setActiveTab("leadDetails");
+                        }}
+                        onImportLeads={() => setActiveTab("importLeads")}
+                    />
+                );
+
+            case "importLeads":
+                return (
+                    <LeadImportClient
+                        embedded
+                        onBack={() => setActiveTab("leads")}
+                        onOpenLead={(leadId) => {
+                            setSelectedLeadId(leadId);
+                            setSelectedLeadOrigin("leads");
                             setActiveTab("leadDetails");
                         }}
                     />

@@ -56,4 +56,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }
-
